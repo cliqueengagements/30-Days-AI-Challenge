@@ -48,9 +48,17 @@ When `--confirm` is passed with `--amount`, generates executable `bitflow_hodlmm
 
 ## Why agents need it
 
-USDCx is Bitflow's native stablecoin, live across 7 HODLMM pools and XYK venues, plus swap routes to Hermetica. An agent holding idle USDCx has no way to compare these venues in a single call — each pool has different APR, different risk profiles, and different fee structures.
+**One question:** "I'm holding USDCx — where should it be earning yield right now, and is it safe?"
 
-This skill gives any agent a single command that answers: **"Where is USDCx earning the most right now, and is it safe?"**
+USDCx is Bitflow's native stablecoin, live across 7 HODLMM pools and XYK venues, plus swap routes to Hermetica. Before this skill, an agent had to manually check each pool, estimate risk, compare APRs, and figure out the contract parameters — across 7+ venues with different fee structures. Now it's one command.
+
+**Five problems, one skill:**
+
+1. **Where is my USDCx now?** → `position` reads on-chain — which pool, which bins, in-range or not
+2. **What are all my options?** → `run` scans 7 HODLMM pools + XYK + Hermetica in one call
+3. **Which option is safest?** → Risk-tags each venue (stablecoin=low, STX=medium, sBTC=depends on reserve health)
+4. **Is moving worth it?** → Profit gate: "will 7 days of extra yield cover 3x the gas to migrate?"
+5. **How do I execute?** → Generates the exact contract call spec for the winning pool
 
 Especially valuable for autonomous agents managing stablecoin reserves, where capital efficiency matters but safety matters more.
 
