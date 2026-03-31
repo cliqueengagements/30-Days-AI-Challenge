@@ -21,6 +21,7 @@ All skills were submitted as pull requests to [BitflowFinance/bff-skills](https:
 | 4 | [Hermetica Yield Rotator](day-4-hermetica-yield-rotator/) | Yield | Merged — Day 4 Winner, $200 BTC ([PR #56](https://github.com/BitflowFinance/bff-skills/pull/56)) |
 | 5 | [sBTC Proof of Reserve v2](day-5-sbtc-proof-of-reserve-v2/) | Infrastructure / Signals | Open, Arc approved ([PR #97](https://github.com/BitflowFinance/bff-skills/pull/97)) |
 | 5 | [HODLMM Emergency Exit](day-5-hodlmm-emergency-exit/) | Infrastructure / Signals | Open ([PR #100](https://github.com/BitflowFinance/bff-skills/pull/100)) |
+| 6 | [[AIBTC Skills Comp Day 6] USDCx Yield Optimizer](day-6-usdcx-yield-optimizer/) | Yield | Open ([PR #118](https://github.com/BitflowFinance/bff-skills/pull/118)) |
 
 ## The Trilogy -- Defense-in-Depth Pipeline
 
