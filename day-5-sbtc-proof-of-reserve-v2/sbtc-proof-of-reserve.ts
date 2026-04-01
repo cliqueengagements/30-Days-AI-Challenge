@@ -484,7 +484,7 @@ program
   .command("run")
   .description("Run Proof-of-Reserve audit and output JSON with HODLMM signal")
   .option("--threshold <number>", "Alert threshold (0-100). Scores below this trigger alert=true", "80")
-  .action(async (opts) => {
+  .action(async (opts: { threshold: string }) => {
     const threshold = parseInt(opts.threshold, 10);
     const result    = await runAudit(isNaN(threshold) ? 80 : threshold);
     console.log(JSON.stringify(result, null, 2));
@@ -496,7 +496,7 @@ program
 
 // Only run CLI when this file is the entry point — not when imported as a module
 if (import.meta.main) {
-  program.parseAsync(process.argv).catch((err) => {
+  program.parseAsync(process.argv).catch((err: any) => {
     console.error(JSON.stringify({ status: "error", error: err.message }));
     process.exit(3);
   });

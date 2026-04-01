@@ -1,3 +1,9 @@
+---
+name: smart-yield-migrator
+skill: true
+description: "Agent behavioral guide for cross-protocol DeFi yield migration optimizer on Stacks"
+---
+
 # Agent Behavior — Smart Yield Migrator
 
 ## Decision order

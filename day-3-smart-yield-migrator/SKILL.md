@@ -1,14 +1,14 @@
 ---
 name: smart-yield-migrator
 description: "Cross-protocol DeFi migration optimizer — scans live APY across Bitflow HODLMM, Zest, and ALEX, estimates real gas cost for the move, and applies a Yield-to-Gas profit gate before recommending any capital migration. Never move a satoshi unless the math says yes."
-author: cliqueengagements
-author_agent: "Micro Basilisk (Agent #77) — SP219TWC8G12CSX5AB093127NC82KYQWEH8ADD1AY"
-user-invocable: true
-arguments: "doctor | install-packs | run --from <zest|hodlmm|alex|pox> --asset <sBTC|STX> --amount <number> [--risk <low|medium|high>]"
-entry: "smart-yield-migrator/smart-yield-migrator.ts"
-requires: []
-tags: [defi, read-only, mainnet-only, l2, yield, hodlmm, infrastructure]
-network: mainnet
+metadata:
+  author: "cliqueengagements"
+  author-agent: "Micro Basilisk (Agent 77) — SP219TWC8G12CSX5AB093127NC82KYQWEH8ADD1AY | bc1qzh2z92dlvccxq5w756qppzz8fymhgrt2dv8cf5"
+  user-invocable: "true"
+  arguments: "doctor | install-packs | run --from <zest|hodlmm|alex|pox> --asset <sBTC|STX> --amount <number> [--risk <low|medium|high>]"
+  entry: "smart-yield-migrator/smart-yield-migrator.ts"
+  requires: ""
+  tags: "defi, read-only, mainnet-only, l2, infrastructure"
 ---
 
 # Smart Yield Migrator
@@ -23,7 +23,7 @@ Runs a three-step checklist before recommending any migration:
 Fetches live APY from every major Stacks yield venue in parallel:
 - Bitflow HODLMM concentrated liquidity pools (`bff.bitflowapis.finance`)
 - Bitflow XYK pools (Bitflow ticker API)
-- Zest Protocol lending (Hiro read-only contract call)
+- Zest Protocol lending (baseline APY estimate)
 - ALEX DEX liquidity pools (`api.alexlab.co`)
 - Stacks PoX stacking (`api.mainnet.hiro.so/v2/pox`)
 
@@ -64,7 +64,7 @@ Especially critical in **emerging markets** (sub-Saharan Africa, Southeast Asia)
 
 ### doctor
 
-Checks all data sources: Bitflow HODLMM API, Bitflow Ticker, Zest contract, ALEX tickers, Hiro PoX, Hiro fee rate, CoinGecko prices.
+Checks all data sources: Bitflow HODLMM API, Bitflow Ticker, ALEX tickers, Hiro PoX, Hiro fee rate, Hiro recent TXs.
 
 ```bash
 bun run smart-yield-migrator/smart-yield-migrator.ts doctor
@@ -133,13 +133,12 @@ All outputs are strict JSON to stdout.
   },
   "checklist": {
     "yield_improvement": "PASS — HODLMM pays 7.4% more than Zest",
-    "min_improvement": "PASS — 7.4% > 1.0% minimum threshold",
     "profit_gate": "PASS — 7d gain ($98.27) > gas × 3 ($0.009)",
     "destination_tvl": "PASS — pool TVL $1.39M > $100k minimum",
     "position_size": "PASS — position ($69,000) above $50 minimum"
   },
   "action": "Withdraw 1.0 sBTC from Zest. Deposit into Bitflow HODLMM dlmm_6 (STX/sBTC). Gas: ~0.012 STX ($0.003). Break-even: 31 minutes.",
-  "sources_used": ["bitflow-hodlmm", "bitflow-xyk", "alex", "pox", "hiro-fees", "coingecko"],
+  "sources_used": ["alex-prices", "bitflow-hodlmm", "bitflow-xyk", "alex", "pox", "hiro-fees"],
   "sources_failed": [],
   "timestamp": "2026-03-27T03:00:00.000Z"
 }
@@ -155,11 +154,11 @@ All outputs are strict JSON to stdout.
 | Hiro PoX | Stacking cycle data, stacked STX | `api.mainnet.hiro.so/v2/pox` |
 | Hiro Fee Rate | Current STX fee rate (μSTX/byte) | `api.mainnet.hiro.so/v2/fees/transfer` |
 | Hiro Transactions | Recent contract call fee samples | `api.mainnet.hiro.so/extended/v1/address/.../transactions` |
-| CoinGecko | BTC/USD, STX/USD spot prices | `api.coingecko.com/api/v3` |
+| ALEX DEX (prices) | BTC/USD, STX/USD spot prices (extracted from ticker pairs) | `api.alexlab.co/v1/tickers` |
 
 ## Known constraints
 
-- Zest Protocol APY is estimated from on-chain supply rate via read-only contract call. If the Zest API is unavailable, Zest is excluded from the destination ranking.
+- Zest Protocol APY uses a baseline estimate (5% sBTC, 7% STX). If live Zest data becomes available via MCP tools, the skill can be extended to fetch real-time rates.
 - HODLMM APY applies only when position stays in the active bin range. Out-of-range = 0 fee income. Pair with HODLMM Bin Guardian for live range monitoring.
 - PoX stacking requires a minimum ~120,000 STX and has a lock-up period per cycle. The skill flags this constraint when PoX is the recommended destination.
 - Gas cost estimates are based on recent median contract call fees. Actual fees may vary ±50% during congestion.

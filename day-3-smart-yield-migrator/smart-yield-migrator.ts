@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+declare var process: { argv: string[]; exit(code?: number): never };
 /**
  * Smart Yield Migrator
  * Cross-protocol DeFi migration optimizer for Stacks.
@@ -21,7 +22,7 @@ const PROFIT_GATE_MULTIPLIER    = 3;      // 7d gain must exceed this × gas cos
 const MIN_APY_IMPROVEMENT_PCT   = 1.0;    // never recommend for <1% APY gain
 const MIN_POSITION_USD          = 50;     // warn if position below this
 const MIN_DEST_TVL_USD          = 100_000;// destination must have >$100k TVL
-const MAX_SLIPPAGE_PCT          = 0.5;    // flag pools with spread >0.5%
+// const MAX_SLIPPAGE_PCT       = 0.5;    // flag pools with spread >0.5% (reserved for future use)
 const GAS_CALLS_PER_MIGRATION   = 2;      // 1 withdraw + 1 deposit = 2 contract calls
 const GAS_BYTES_PER_CALL        = 400;    // estimated bytes per contract call
 const FALLBACK_FEE_UESTX        = 4000;   // fallback if fee API unavailable (4000 μSTX)
@@ -36,13 +37,68 @@ const ALEX_TICKERS    = "https://api.alexlab.co/v1/tickers";
 const HIRO_POX        = "https://api.mainnet.hiro.so/v2/pox";
 const HIRO_FEE_RATE   = "https://api.mainnet.hiro.so/v2/fees/transfer";
 const HIRO_RECENT_TXS = "https://api.mainnet.hiro.so/extended/v1/address/SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4/transactions?limit=10";
-const COINGECKO       = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,blockstack&vs_currencies=usd";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type Protocol   = "zest" | "hodlmm" | "alex" | "pox" | "bitflow-xyk";
 type Asset      = "sBTC" | "STX";
 type RiskLevel  = "low" | "medium" | "high";
 type Verdict    = "MIGRATE" | "STAY" | "INSUFFICIENT_DATA";
+
+interface AlexTicker {
+  base_currency:        string;
+  target_currency:      string;
+  lastBasePriceInUSD:   string;
+  lastTargetPriceInUSD: string;
+  baseVolume:           string;
+  targetVolume:         string;
+}
+
+interface HiroTransaction {
+  tx_type:  string;
+  fee_rate: string;
+}
+
+interface HiroTxResponse {
+  results: HiroTransaction[];
+}
+
+interface HodlmmPool {
+  active:          boolean;
+  pool_status:     string;
+  pool_id:         string;
+  token_x:         string;
+  token_y:         string;
+  x_provider_fee?: number;
+  y_provider_fee?: number;
+}
+
+interface HodlmmApiResponse {
+  pools: HodlmmPool[];
+}
+
+interface BitflowTicker {
+  pool_id:          string;
+  base_currency:    string;
+  target_currency:  string;
+  liquidity_in_usd: string;
+  base_volume:      string;
+  target_volume:    string;
+}
+
+interface HiroPoxResponse {
+  current_cycle: {
+    id:            number;
+    stacked_ustx:  number;
+  };
+  reward_phase_block_length:  number;
+  prepare_phase_block_length: number;
+}
+
+interface DoctorSource {
+  name:  string;
+  url:   string;
+  parse: (d: unknown) => string;
+}
 
 interface YieldVenue {
   protocol:   Protocol | string;
@@ -84,7 +140,7 @@ interface MigrationResult {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-async function fetchJson(url: string, timeoutMs = 12_000): Promise<any> {
+async function fetchJson<T = unknown>(url: string, timeoutMs = 12_000): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -107,24 +163,42 @@ function weeklyEarnUsd(amount: number, assetPriceUsd: number, apyPct: number): n
   return (amount * assetPriceUsd * apyPct) / 100 / 52;
 }
 
+// ── Price fetching (from ALEX tickers — no external oracle needed) ────────────
+async function fetchPricesFromAlex(): Promise<Record<string, number>> {
+  const tickers = await fetchJson<AlexTicker[]>(ALEX_TICKERS);
+  let btc = 0;
+  let stx = 0;
+  for (const t of tickers) {
+    const base = (t.base_currency ?? "").toLowerCase();
+    const tgt  = (t.target_currency ?? "").toLowerCase();
+    const baseUsd  = parseFloat(t.lastBasePriceInUSD ?? "0") || 0;
+    const tgtUsd   = parseFloat(t.lastTargetPriceInUSD ?? "0") || 0;
+    if ((base.includes("sbtc") || base === "xbtc") && baseUsd > btc) btc = baseUsd;
+    if ((tgt.includes("sbtc") || tgt === "xbtc") && tgtUsd > btc)   btc = tgtUsd;
+    if (base === "stx" && baseUsd > stx) stx = baseUsd;
+    if (tgt === "stx" && tgtUsd > stx)   stx = tgtUsd;
+  }
+  return { btc: btc || 100_000, stx: stx || 0.40 };
+}
+
 // ── Gas estimation ─────────────────────────────────────────────────────────────
 async function estimateGasCostStx(): Promise<number> {
   // Strategy 1: fetch base fee rate (μSTX/byte) from Hiro
   let feeRateUstx = FALLBACK_FEE_UESTX;
   try {
-    const raw = await fetchJson(HIRO_FEE_RATE);
+    const raw = await fetchJson<number | Record<string, number>>(HIRO_FEE_RATE);
     // Returns a number (μSTX/byte) or object
-    const rate = typeof raw === "number" ? raw : (raw?.median ?? raw?.fee_rate ?? 1);
+    const rate = typeof raw === "number" ? raw : ((raw as Record<string, number>)?.median ?? (raw as Record<string, number>)?.fee_rate ?? 1);
     const perCall = Math.max(rate, 1) * GAS_BYTES_PER_CALL;
     feeRateUstx = perCall;
   } catch { /* use fallback */ }
 
   // Strategy 2: sample recent contract call fees for reality check
   try {
-    const txData = await fetchJson(HIRO_RECENT_TXS);
+    const txData = await fetchJson<HiroTxResponse>(HIRO_RECENT_TXS);
     const fees: number[] = (txData?.results ?? [])
-      .filter((tx: any) => tx.tx_type === "contract_call" && tx.fee_rate)
-      .map((tx: any) => parseInt(tx.fee_rate, 10))
+      .filter((tx) => tx.tx_type === "contract_call" && tx.fee_rate)
+      .map((tx) => parseInt(tx.fee_rate, 10))
       .filter((f: number) => !isNaN(f) && f > 0);
 
     if (fees.length > 0) {
@@ -142,10 +216,10 @@ async function estimateGasCostStx(): Promise<number> {
 
 // ── Protocol APY fetchers ──────────────────────────────────────────────────────
 async function fetchHodlmmVenues(priceMap: Record<string, number>): Promise<YieldVenue[]> {
-  const data: any = await fetchJson(BITFLOW_HODLMM);
-  const pools: any[] = data?.pools ?? [];
-  let tickers: any[] = [];
-  try { tickers = await fetchJson(BITFLOW_TICKER); } catch { /* skip */ }
+  const data = await fetchJson<HodlmmApiResponse>(BITFLOW_HODLMM);
+  const pools = data?.pools ?? [];
+  let tickers: BitflowTicker[] = [];
+  try { tickers = await fetchJson<BitflowTicker[]>(BITFLOW_TICKER); } catch { /* skip */ }
 
   const venues: YieldVenue[] = [];
   for (const pool of pools) {
@@ -154,14 +228,12 @@ async function fetchHodlmmVenues(priceMap: Record<string, number>): Promise<Yiel
     const txStr = (pool.token_x ?? "").toLowerCase();
     const tyStr = (pool.token_y ?? "").toLowerCase();
     const hasSbtc = txStr.includes("sbtc") || tyStr.includes("sbtc");
-    const hasStx  = txStr.includes("token-stx") || tyStr.includes("token-stx") ||
-                    txStr.includes("stx-v") || tyStr.includes("stx-v");
 
     const asset: Asset = hasSbtc ? "sBTC" : "STX";
     const feeBps = (pool.x_provider_fee ?? 15) + (pool.y_provider_fee ?? 15);
 
     // Match ticker for TVL/volume
-    const ticker = tickers.find((t: any) => {
+    const ticker = tickers.find((t) => {
       const base = (t.base_currency ?? "").toLowerCase();
       const tgt  = (t.target_currency ?? "").toLowerCase();
       return (txStr.includes(base) || tyStr.includes(base)) &&
@@ -173,7 +245,7 @@ async function fetchHodlmmVenues(priceMap: Record<string, number>): Promise<Yiel
 
     // Special case: dlmm_6 is STX/sBTC — use XYK ticker as TVL proxy
     if (tvlUsd < MIN_DEST_TVL_USD && pool.pool_id === "dlmm_6") {
-      const xykTicker = tickers.find((t: any) =>
+      const xykTicker = tickers.find((t) =>
         (t.base_currency ?? "").toLowerCase().includes("sbtc") && t.target_currency === "Stacks"
       );
       tvlUsd = xykTicker ? parseFloat(xykTicker.liquidity_in_usd ?? "0") || 0 : 0;
@@ -208,7 +280,7 @@ async function fetchHodlmmVenues(priceMap: Record<string, number>): Promise<Yiel
 }
 
 async function fetchXykVenues(priceMap: Record<string, number>): Promise<YieldVenue[]> {
-  const tickers: any[] = await fetchJson(BITFLOW_TICKER);
+  const tickers = await fetchJson<BitflowTicker[]>(BITFLOW_TICKER);
   const venues: YieldVenue[] = [];
 
   for (const t of tickers) {
@@ -244,8 +316,8 @@ async function fetchXykVenues(priceMap: Record<string, number>): Promise<YieldVe
   return venues;
 }
 
-async function fetchAlexVenues(priceMap: Record<string, number>): Promise<YieldVenue[]> {
-  const tickers: any[] = await fetchJson(ALEX_TICKERS);
+async function fetchAlexVenues(): Promise<YieldVenue[]> {
+  const tickers = await fetchJson<AlexTicker[]>(ALEX_TICKERS);
   const venues: YieldVenue[] = [];
 
   for (const t of tickers) {
@@ -285,17 +357,16 @@ async function fetchAlexVenues(priceMap: Record<string, number>): Promise<YieldV
 }
 
 async function fetchPoxVenue(priceMap: Record<string, number>): Promise<YieldVenue[]> {
-  const pox: any = await fetchJson(HIRO_POX);
+  const pox = await fetchJson<HiroPoxResponse>(HIRO_POX);
   const cycle = pox?.current_cycle;
   if (!cycle) throw new Error("PoX: no cycle data");
 
   const stackedStx   = (cycle.stacked_ustx ?? 0) / 1_000_000;
-  const minThreshold = (cycle.min_threshold_ustx ?? 0) / 1_000_000;
   const tvlUsd       = stackedStx * (priceMap["stx"] ?? 0);
   const cycleLenBlk  = (pox.reward_phase_block_length ?? 2000) + (pox.prepare_phase_block_length ?? 100);
 
   return [{
-    protocol: "pox",
+    protocol: "pox" as Protocol,
     pool:     `PoX Cycle ${cycle.id}`,
     asset:    "STX",
     apy_pct:  POX_BASE_APY_PCT,
@@ -319,14 +390,13 @@ function getFromApyEstimate(protocol: string, asset: Asset): number {
 
 // ── Commands ───────────────────────────────────────────────────────────────────
 async function runDoctor(): Promise<void> {
-  const sources = [
-    { name: "Bitflow HODLMM API",    url: BITFLOW_HODLMM,  parse: (d: any) => `${d?.pools?.length ?? 0} pools` },
-    { name: "Bitflow Ticker (XYK)",  url: BITFLOW_TICKER,  parse: (d: any) => `${d.length} pools` },
-    { name: "ALEX DEX Tickers",      url: ALEX_TICKERS,    parse: (d: any) => `${d.length} pairs` },
-    { name: "Hiro PoX",             url: HIRO_POX,        parse: (d: any) => `cycle ${d?.current_cycle?.id}` },
-    { name: "Hiro Fee Rate",         url: HIRO_FEE_RATE,   parse: (d: any) => `${d} μSTX/byte` },
-    { name: "Hiro Recent TXs (gas)", url: HIRO_RECENT_TXS, parse: (d: any) => `${d?.results?.length ?? 0} txs` },
-    { name: "CoinGecko Prices",      url: COINGECKO,       parse: (d: any) => `BTC $${d?.bitcoin?.usd} STX $${d?.blockstack?.usd}` },
+  const sources: DoctorSource[] = [
+    { name: "Bitflow HODLMM API",    url: BITFLOW_HODLMM,  parse: (d) => `${(d as HodlmmApiResponse)?.pools?.length ?? 0} pools` },
+    { name: "Bitflow Ticker (XYK)",  url: BITFLOW_TICKER,  parse: (d) => `${(d as BitflowTicker[]).length} pools` },
+    { name: "ALEX DEX Tickers",      url: ALEX_TICKERS,    parse: (d) => `${(d as AlexTicker[]).length} pairs` },
+    { name: "Hiro PoX",             url: HIRO_POX,        parse: (d) => `cycle ${(d as HiroPoxResponse)?.current_cycle?.id}` },
+    { name: "Hiro Fee Rate",         url: HIRO_FEE_RATE,   parse: (d) => `${d} μSTX/byte` },
+    { name: "Hiro Recent TXs (gas)", url: HIRO_RECENT_TXS, parse: (d) => `${(d as HiroTxResponse)?.results?.length ?? 0} txs` },
   ];
 
   const checks: { name: string; ok: boolean; detail: string }[] = [];
@@ -334,8 +404,8 @@ async function runDoctor(): Promise<void> {
     try {
       const data = await fetchJson(s.url);
       checks.push({ name: s.name, ok: true, detail: s.parse(data) });
-    } catch (e: any) {
-      checks.push({ name: s.name, ok: false, detail: e.message });
+    } catch (e) {
+      checks.push({ name: s.name, ok: false, detail: e instanceof Error ? e.message : String(e) });
     }
   }));
 
@@ -369,13 +439,12 @@ async function runMigration(opts: {
   };
 
   try {
-    // ── Step 0: Prices ─────────────────────────────────────────────────────────
-    let priceMap: Record<string, number> = { btc: 69000, stx: 0.235 };
+    // ── Step 0: Prices (from ALEX tickers — no external oracle) ────────────────
+    let priceMap: Record<string, number> = { btc: 100_000, stx: 0.40 };
     try {
-      const prices = await fetchJson(COINGECKO);
-      priceMap = { btc: prices?.bitcoin?.usd ?? 69000, stx: prices?.blockstack?.usd ?? 0.235 };
-      result.sources_used.push("coingecko");
-    } catch { result.sources_failed.push("coingecko"); }
+      priceMap = await fetchPricesFromAlex();
+      result.sources_used.push("alex-prices");
+    } catch { result.sources_failed.push("alex-prices"); }
 
     const assetPriceUsd = opts.asset === "sBTC" ? priceMap["btc"] : priceMap["stx"];
     const positionValueUsd = opts.amount * assetPriceUsd;
@@ -396,7 +465,7 @@ async function runMigration(opts: {
     const [hodlmmRes, xykRes, alexRes, poxRes] = await Promise.allSettled([
       fetchHodlmmVenues(priceMap),
       fetchXykVenues(priceMap),
-      fetchAlexVenues(priceMap),
+      fetchAlexVenues(),
       fetchPoxVenue(priceMap),
     ]);
 
@@ -432,7 +501,7 @@ async function runMigration(opts: {
 
     const candidates = allVenues
       .filter(v => v.protocol !== opts.from)                  // not where we already are
-      .filter(v => v.asset === opts.asset || opts.asset === "sBTC" && v.asset === "STX")
+      .filter(v => v.asset === opts.asset || (opts.asset === "sBTC" && v.asset === "STX"))
       .filter(v => v.tvl_usd >= MIN_DEST_TVL_USD)            // liquidity check
       .filter(v => riskOrder[v.risk] <= maxRisk)              // risk filter
       .sort((a, b) => b.apy_pct - a.apy_pct);
@@ -529,10 +598,10 @@ async function runMigration(opts: {
     console.log(JSON.stringify(result, null, 2));
     if (result.status === "degraded") process.exit(1);
 
-  } catch (err: any) {
+  } catch (err) {
     result.status  = "error";
     result.verdict = "INSUFFICIENT_DATA";
-    result.error   = err.message;
+    result.error   = err instanceof Error ? err.message : String(err);
     result.action  = "Error during analysis. Check sources_failed and retry.";
     console.log(JSON.stringify(result, null, 2));
     process.exit(3);
