@@ -1,5 +1,6 @@
 # Day 3 — feat(hodlmm-bin-guardian): add HODLMM LP range monitor skill
-> **Original PR:** https://github.com/BitflowFinance/bff-skills/pull/39
+> **Original PR:** https://github.com/BitflowFinance/bff-skills/pull/39 (merged)
+> **Live upstream:** https://github.com/BitflowFinance/bff-skills/tree/main/skills/hodlmm-bin-guardian
 
 ## Skill Name
 

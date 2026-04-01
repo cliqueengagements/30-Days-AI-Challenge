@@ -1,5 +1,6 @@
 # Day 3 — [AIBTC Skills Comp Day 3] Smart Yield Migrator
-> **Original PR:** https://github.com/BitflowFinance/bff-skills/pull/26
+> **Original PR:** https://github.com/BitflowFinance/bff-skills/pull/26 (closed)
+> **Resubmission:** https://github.com/BitflowFinance/bff-skills/pull/122
 
 
   # Smart Yield Migrator
@@ -19,8 +20,8 @@
   - Zero hardcoded APYs - all yield data is live from protocol APIs
 
   ### Part of the LAB Trilogy
-  - Day 1 - **Muscle**: [HODLMM Bin Guardian](https://github.com/BitflowFinance/bff-skills/pull/39#issue-4156113324) - monitor your position
-  - Day 2 - **Brain**: [sBTC Peg Oracle](https://github.com/BitflowFinance/bff-skills/pull/24#issue-4148238122) - know market conditions & Audits
+  - Day 1 - **Muscle**: [HODLMM Bin Guardian](https://github.com/BitflowFinance/bff-skills/tree/main/skills/hodlmm-bin-guardian) - monitor your position
+  - Day 2 - **Brain**: [sBTC Peg Oracle](../day-2-sbtc-proof-of-reserve/) - know market conditions & Audits
   - Day 3 - **Economist**: Smart Yield Migrator - only act when it is profitable
 
   Built for capital-constrained agents in emerging markets where gas efficiency matters as much as yield.

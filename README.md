@@ -16,12 +16,12 @@ All skills were submitted as pull requests to [BitflowFinance/bff-skills](https:
 |-----|-------|----------|--------|
 | 1 | [HODLMM Bin Guardian](day-1-hodlmm-bin-guardian/) | Yield | Closed — resubmitted as [Day 3 v2](day-3-hodlmm-bin-guardian-v2/) |
 | 2 | [sBTC Proof of Reserve](day-2-sbtc-proof-of-reserve/) | Infrastructure | Closed — resubmitted as [Day 5 v2](day-5-sbtc-proof-of-reserve-v2/) |
-| 3 | [Smart Yield Migrator](day-3-smart-yield-migrator/) | Yield / Infrastructure | Open ([PR #26](https://github.com/BitflowFinance/bff-skills/pull/26)) |
-| 3 | [HODLMM Bin Guardian v2](day-3-hodlmm-bin-guardian-v2/) | Signals | Merged — Day 3 Winner ([PR #39](https://github.com/BitflowFinance/bff-skills/pull/39)) |
-| 4 | [Hermetica Yield Rotator](day-4-hermetica-yield-rotator/) | Yield | Merged — Day 4 Winner, $200 BTC ([PR #56](https://github.com/BitflowFinance/bff-skills/pull/56)) |
-| 5 | [sBTC Proof of Reserve v2](day-5-sbtc-proof-of-reserve-v2/) | Infrastructure / Signals | Open, Arc approved ([PR #97](https://github.com/BitflowFinance/bff-skills/pull/97)) |
-| 5 | [HODLMM Emergency Exit](day-5-hodlmm-emergency-exit/) | Infrastructure / Signals | Open ([PR #100](https://github.com/BitflowFinance/bff-skills/pull/100)) |
-| 6 | [[AIBTC Skills Comp Day 6] USDCx Yield Optimizer](day-6-usdcx-yield-optimizer/) | Yield | Open ([PR #118](https://github.com/BitflowFinance/bff-skills/pull/118)) |
+| 3 | [Smart Yield Migrator](day-3-smart-yield-migrator/) | Yield / Infrastructure | Resubmitted as v2 ([PR #122](https://github.com/BitflowFinance/bff-skills/pull/122)) |
+| 3 | [HODLMM Bin Guardian v2](day-3-hodlmm-bin-guardian-v2/) | Signals | Merged — Day 3 Winner ([upstream](https://github.com/BitflowFinance/bff-skills/tree/main/skills/hodlmm-bin-guardian)) |
+| 4 | [Hermetica Yield Rotator](day-4-hermetica-yield-rotator/) | Yield | Merged — Day 4 Winner, $200 BTC ([upstream](https://github.com/BitflowFinance/bff-skills/tree/main/skills/hermetica-yield-rotator)) |
+| 5 | [sBTC Proof of Reserve v2](day-5-sbtc-proof-of-reserve-v2/) | Infrastructure / Signals | Closed — archived here |
+| 5 | [HODLMM Emergency Exit](day-5-hodlmm-emergency-exit/) | Infrastructure / Signals | Closed — archived here |
+| 6 | [USDCx Yield Optimizer](day-6-usdcx-yield-optimizer/) | Yield | Open ([PR #118](https://github.com/BitflowFinance/bff-skills/pull/118)) |
 
 ## The Trilogy -- Defense-in-Depth Pipeline
 
@@ -56,7 +56,7 @@ Key results so far:
 - **Day 3**: HODLMM Bin Guardian v2 -- Winner (merged)
 - **Day 4**: Hermetica Yield Rotator -- Winner, $200 BTC prize (merged)
 
-The competition runs for 30 days. This repo currently covers Days 1-5 and will be updated with new skills as they are built and submitted throughout the challenge. Check back for new entries.
+The competition runs for 30 days. This repo currently covers Days 1-6 and will be updated with new skills as they are built and submitted throughout the challenge. Check back for new entries.
 
 ## Agent
 

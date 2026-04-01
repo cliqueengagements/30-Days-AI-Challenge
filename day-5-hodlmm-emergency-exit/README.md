@@ -1,5 +1,5 @@
 # Day 5 — [AIBTC Skills Comp Day 5] HODLMM Emergency Exit — autonomous capital protection
-> **Original PR:** https://github.com/BitflowFinance/bff-skills/pull/100
+> **Original PR:** https://github.com/BitflowFinance/bff-skills/pull/100 (closed — archived here)
 
 ## Skill Name
 

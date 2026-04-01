@@ -1,5 +1,5 @@
 # Day 5 — feat(sbtc-proof-of-reserve): v2 added fixes
-> **Original PR:** https://github.com/BitflowFinance/bff-skills/pull/97
+> **Original PR:** https://github.com/BitflowFinance/bff-skills/pull/97 (closed — archived here)
 
 ## Skill Name
 

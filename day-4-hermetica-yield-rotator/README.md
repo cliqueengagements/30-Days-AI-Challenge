@@ -1,5 +1,6 @@
 # Day 4 — [AIBTC Skills Comp Day 4] Hermetica Yield Rotator
-> **Original PR:** https://github.com/BitflowFinance/bff-skills/pull/56
+> **Original PR:** https://github.com/BitflowFinance/bff-skills/pull/56 (merged)
+> **Live upstream:** https://github.com/BitflowFinance/bff-skills/tree/main/skills/hermetica-yield-rotator
 
 ## Skill name
 

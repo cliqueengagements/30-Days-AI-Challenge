@@ -25,7 +25,7 @@
   ### HODLMM Bonus Eligibility
   - Integrates Bitflow ticker API for live sBTC/pBTC price deviation
   - Exportable `runAudit()` — importable pre-flight check for any HODLMM agent
-  - Pairs with [hodlmm-bin-guardian](https://github.com/BitflowFinance/bff-skills/pull/15#issuecomment-4139272430) as a complete two-skill security stack
+  - Pairs with [hodlmm-bin-guardian](https://github.com/BitflowFinance/bff-skills/tree/main/skills/hodlmm-bin-guardian) as a complete two-skill security stack
   - Zero hardcoded values — all reserve data is live on-chain
 
   ### Verified on Mainnet
