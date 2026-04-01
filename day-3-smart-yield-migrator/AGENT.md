@@ -1,6 +1,6 @@
 ---
 name: smart-yield-migrator
-skill: true
+skill: smart-yield-migrator
 description: "Agent behavioral guide for cross-protocol DeFi yield migration optimizer on Stacks"
 ---
 
@@ -68,7 +68,7 @@ fi
 - `checklist.position_size` is `FAIL` — position too small; migration cost is disproportionate
 - `status` is `error` — data unavailable, do not act on incomplete analysis
 
-## Safety rules enforced by the skill
+## Guardrails
 
 The agent does NOT need to re-implement these checks — the skill enforces them:
 - Profit gate: 7-day gain > gas × 3

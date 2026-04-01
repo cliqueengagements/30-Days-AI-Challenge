@@ -8,7 +8,7 @@ metadata:
   arguments: "doctor | install-packs | run --wallet <STX_ADDRESS> [--pool-id <id>] [--confirm]"
   entry: "hodlmm-emergency-exit/hodlmm-emergency-exit.ts"
   requires: "sbtc-proof-of-reserve (co-located at ../sbtc-proof-of-reserve/ — imports runAudit(), AuditResult, HodlmmSignal)"
-  tags: "defi, hodlmm, write, mainnet-only, safety, infrastructure"
+  tags: "defi, write, mainnet-only, requires-funds, infrastructure"
 ---
 
 # HODLMM Emergency Exit

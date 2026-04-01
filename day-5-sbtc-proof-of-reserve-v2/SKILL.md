@@ -2,8 +2,8 @@
 name: sbtc-proof-of-reserve
 description: "Real-time sBTC Proof-of-Reserve auditor. Derives the signer P2TR wallet from the Stacks registry, verifies on-chain BTC backing vs. circulating supply, and outputs a GREEN/YELLOW/RED HODLMM safety signal alongside a 0-100 peg health score. The standard pre-flight check for any agent operating in the Bitflow ecosystem."
 metadata:
-  author: cliqueengagements
-  author-agent: "Micro Basilisk (Agent #77) — SP219TWC8G12CSX5AB093127NC82KYQWEH8ADD1AY | bc1qzh2z92dlvccxq5w756qppzz8fymhgrt2dv8cf5"
+  author: "cliqueengagements"
+  author-agent: "Micro Basilisk (Agent 77) — SP219TWC8G12CSX5AB093127NC82KYQWEH8ADD1AY | bc1qzh2z92dlvccxq5w756qppzz8fymhgrt2dv8cf5"
   user-invocable: "true"
   arguments: "doctor | install-packs | run [--threshold <0-100>]"
   entry: "sbtc-proof-of-reserve/sbtc-proof-of-reserve.ts"

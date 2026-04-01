@@ -1,5 +1,8 @@
 #!/usr/bin/env bun
 declare var process: { argv: string[]; exit(code?: number): never };
+
+import { Command } from "commander";
+
 /**
  * Smart Yield Migrator
  * Cross-protocol DeFi migration optimizer for Stacks.
@@ -608,44 +611,55 @@ async function runMigration(opts: {
   }
 }
 
-// ── CLI ────────────────────────────────────────────────────────────────────────
-const args = process.argv.slice(2);
-const command = args[0] ?? "run";
+// ── CLI (Commander.js) ────────────────────────────────────────────────────────
 
-function getArg(flag: string, fallback: string): string {
-  const idx = args.indexOf(flag);
-  return idx !== -1 && args[idx + 1] ? args[idx + 1] : fallback;
-}
+const program = new Command();
 
-if (command === "doctor") {
-  runDoctor().catch(err => {
-    console.log(JSON.stringify({ status: "error", error: err.message }));
+program
+  .name("smart-yield-migrator")
+  .description("Cross-protocol DeFi migration optimizer for Stacks — scans HODLMM, Zest, ALEX, PoX")
+  .version("1.0.0");
+
+program
+  .command("doctor")
+  .description("Verify all data sources, dependencies, and readiness")
+  .action(async () => {
+    await runDoctor();
+  });
+
+program
+  .command("install-packs")
+  .description("No additional packs required — self-contained")
+  .action(() => {
+    console.log(JSON.stringify({ status: "ok", message: "No additional packs required — self-contained." }));
+  });
+
+program
+  .command("run", { isDefault: true })
+  .description("Scan all yield venues and recommend migration or hold")
+  .option("--from <protocol>", "Current protocol: zest, hodlmm, alex, pox, bitflow-xyk", "zest")
+  .option("--asset <asset>", "Asset to migrate: sBTC or STX", "sBTC")
+  .option("--amount <value>", "Position size in asset units", "1.0")
+  .option("--risk <level>", "Risk tolerance: low, medium, high", "medium")
+  .action(async (opts: { from: string; asset: string; amount: string; risk: string }) => {
+    const validFrom = ["zest", "hodlmm", "alex", "pox", "bitflow-xyk"];
+    const from = validFrom.includes(opts.from) ? opts.from : "zest";
+
+    const asset: Asset = opts.asset === "STX" ? "STX" : "sBTC";
+
+    const rawAmount = parseFloat(opts.amount);
+    const amount = isNaN(rawAmount) || rawAmount <= 0 ? 1.0 : rawAmount;
+
+    const rawRisk = opts.risk;
+    const risk: RiskLevel = ["low", "medium", "high"].includes(rawRisk) ? rawRisk as RiskLevel : "medium";
+
+    await runMigration({ from, asset, amount, risk });
+  });
+
+if (import.meta.main) {
+  program.parseAsync(process.argv).catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(JSON.stringify({ status: "error", error: msg }));
     process.exit(3);
   });
-} else if (command === "install-packs") {
-  console.log(JSON.stringify({ status: "ok", message: "No additional packs required — self-contained." }));
-} else if (command === "run") {
-  const rawFrom  = getArg("--from", "zest");
-  const validFrom = ["zest", "hodlmm", "alex", "pox", "bitflow-xyk"];
-  const from = validFrom.includes(rawFrom) ? rawFrom : "zest";
-
-  const rawAsset = getArg("--asset", "sBTC");
-  const asset: Asset = rawAsset === "STX" ? "STX" : "sBTC";
-
-  const rawAmount = parseFloat(getArg("--amount", "1.0"));
-  const amount = isNaN(rawAmount) || rawAmount <= 0 ? 1.0 : rawAmount;
-
-  const rawRisk = getArg("--risk", "medium");
-  const risk: RiskLevel = ["low", "medium", "high"].includes(rawRisk) ? rawRisk as RiskLevel : "medium";
-
-  runMigration({ from, asset, amount, risk }).catch(err => {
-    console.log(JSON.stringify({ status: "error", error: err.message }));
-    process.exit(3);
-  });
-} else {
-  console.log(JSON.stringify({
-    status: "error",
-    error:  `Unknown command: ${command}. Use: doctor | install-packs | run`,
-  }));
-  process.exit(3);
 }

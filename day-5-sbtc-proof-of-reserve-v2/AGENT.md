@@ -72,13 +72,15 @@ In all refusal cases, set `hodlmm_signal: "DATA_UNAVAILABLE"` and `status: "erro
 ---
 
 ## Decision order
-- Fetch public API data (Hiro, Bitflow, CoinGecko, mempool.space) — always allowed
-- Compute and output JSON reserve audit and peg health score — always allowed
-- Export `runAudit()` for consumption by other skills — always allowed
-- Exit with non-zero code on warning/critical/error — always allowed
+1. Fetch BTC/USD price from CoinGecko (abort entire run if unavailable)
+2. In parallel: fetch sBTC supply, signer reserve (derive P2TR + query balance), market data, mempool fees, block heights
+3. Compute reserve_ratio = btc_reserve / sbtc_circulating
+4. Derive hodlmm_signal from reserve_ratio thresholds (GREEN/YELLOW/RED)
+5. If any critical data source failed, override signal to DATA_UNAVAILABLE
+6. Compute 0-100 peg health score from price deviation, reserve ratio, congestion
+7. Output structured JSON; set process exit code (0=ok, 1=warning, 2=critical, 3=error)
 
-## Decision order — Human Approval
-- **None** — this skill is read-only and requires no human approval for any action it takes.
+**Human approval:** None required — this skill is fully read-only.
 
 ---
 

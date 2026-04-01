@@ -61,7 +61,7 @@ description: "Autonomous USDCx yield deployer — reads on-chain HODLMM position
 - `status` is `error` — data unavailable, do not act on incomplete analysis
 - `risk_assessment.sbtc_reserve_signal` is `RED` and best venue is sBTC-paired
 
-## Safety rules enforced by the skill
+## Guardrails
 
 The agent does NOT need to re-implement these checks — the skill enforces them in code:
 - Profit gate: 7-day extra yield > gas cost x 3

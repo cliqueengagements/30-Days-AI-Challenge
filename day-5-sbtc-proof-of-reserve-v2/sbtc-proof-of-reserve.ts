@@ -138,7 +138,7 @@ function xOnlyPubkeyToP2TR(xOnlyHex: string): string {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-async function fetchJson(url: string, opts: RequestInit = {}): Promise<any> {
+async function fetchJson(url: string, opts: RequestInit = {}): Promise<unknown> {
   const res = await fetch(url, {
     ...opts,
     headers: { "User-Agent": "bff-skills/sbtc-proof-of-reserve", ...(opts.headers ?? {}) },
@@ -164,7 +164,7 @@ async function fetchSbtcSupply(): Promise<number> {
   const res = await fetchJson(
     `${HIRO_API}/v2/contracts/call-read/${addr}/${name}/get-total-supply`,
     { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
-  );
+  ) as { okay?: boolean; result?: string };
   if (res.okay && res.result) {
     const hex = res.result.replace(/^0x/, "");
     if (hex.startsWith("01")) {
@@ -172,7 +172,7 @@ async function fetchSbtcSupply(): Promise<number> {
     }
   }
   // Fallback: token metadata endpoint (BigInt intermediate for precision at scale)
-  const meta = await fetchJson(`${HIRO_API}/metadata/v1/ft/${SBTC_CONTRACT}`);
+  const meta = await fetchJson(`${HIRO_API}/metadata/v1/ft/${SBTC_CONTRACT}`) as { total_supply?: string };
   return Number(BigInt(meta?.total_supply ?? "0")) / 10 ** SBTC_DECIMALS;
 }
 
@@ -185,7 +185,7 @@ async function fetchSignerReserve(): Promise<{ address: string; btc: number }> {
   const res = await fetchJson(
     `${HIRO_API}/v2/contracts/call-read/${SBTC_REGISTRY}/${SBTC_REGISTRY_NAME}/get-current-aggregate-pubkey`,
     { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
-  );
+  ) as { okay?: boolean; result?: string };
   if (!res.okay || !res.result) throw new Error("sbtc-registry returned no aggregate pubkey");
 
   // Clarity buffer: 0x + type byte "02" + 4-byte length "00000021" + 33-byte compressed pubkey
@@ -197,7 +197,9 @@ async function fetchSignerReserve(): Promise<{ address: string; btc: number }> {
   const xOnlyHex     = compressedPubkey.slice(2); // strip 02/03 prefix
   const signerAddress = xOnlyPubkeyToP2TR(xOnlyHex);
 
-  const addrInfo = await fetchJson(`${MEMPOOL_API}/address/${signerAddress}`);
+  const addrInfo = await fetchJson(`${MEMPOOL_API}/address/${signerAddress}`) as {
+    chain_stats?: { funded_txo_sum?: number; spent_txo_sum?: number };
+  };
   const funded   = addrInfo?.chain_stats?.funded_txo_sum ?? 0;
   const spent    = addrInfo?.chain_stats?.spent_txo_sum  ?? 0;
   const btc      = (funded - spent) / 1e8;
@@ -210,27 +212,35 @@ async function fetchSbtcMarketData(btcPriceUsd: number): Promise<{
   pegSource: string;
   sbtcUsd:   number;
 }> {
-  const tickers: any[] = await fetchJson(BITFLOW_TICKER);
+  interface TickerEntry {
+    pool_id?: string;
+    base_currency?: string;
+    target_currency?: string;
+    last_price?: string;
+  }
+  const tickers = await fetchJson(BITFLOW_TICKER) as TickerEntry[];
 
   // Prefer sBTC/pBTC pool — direct peg ratio, no USD conversion needed
   const pbtcPair = tickers.find(
-    (t: any) => t.pool_id?.toLowerCase().includes("sbtc-pbtc") && parseFloat(t.last_price ?? "0") > 0
+    (t) => t.pool_id?.toLowerCase().includes("sbtc-pbtc") && parseFloat(t.last_price ?? "0") > 0
   );
   if (pbtcPair) {
-    const ratio = parseFloat(pbtcPair.last_price);
+    const ratio = parseFloat(pbtcPair.last_price ?? "0");
     return { pegRatio: ratio, pegSource: "sbtc/pbtc-pool", sbtcUsd: ratio * btcPriceUsd };
   }
 
   // Fallback: derive via sBTC/STX * STX/USD
   const stxPair = tickers.find(
-    (t: any) =>
+    (t) =>
       t.base_currency?.toLowerCase().includes("sbtc") &&
       t.target_currency === "Stacks" &&
       parseFloat(t.last_price ?? "0") > 0
   );
   if (!stxPair) return { pegRatio: 1, pegSource: "unavailable", sbtcUsd: btcPriceUsd };
 
-  const stxData = await fetchJson(`${COINGECKO_API}/simple/price?ids=blockstack&vs_currencies=usd`);
+  const stxData = await fetchJson(`${COINGECKO_API}/simple/price?ids=blockstack&vs_currencies=usd`) as {
+    blockstack?: { usd?: number };
+  };
   const stxUsd  = stxData?.blockstack?.usd ?? 0;
   if (!stxUsd) return { pegRatio: 1, pegSource: "unavailable", sbtcUsd: btcPriceUsd };
 
@@ -240,12 +250,14 @@ async function fetchSbtcMarketData(btcPriceUsd: number): Promise<{
 }
 
 async function fetchBtcPrice(): Promise<number> {
-  const data = await fetchJson(`${COINGECKO_API}/simple/price?ids=bitcoin&vs_currencies=usd`);
+  const data = await fetchJson(`${COINGECKO_API}/simple/price?ids=bitcoin&vs_currencies=usd`) as {
+    bitcoin?: { usd?: number };
+  };
   return data?.bitcoin?.usd ?? 0;
 }
 
 async function fetchMempoolFees(): Promise<{ fastestFee: number; congestion: string }> {
-  const fees    = await fetchJson(`${MEMPOOL_API}/v1/fees/recommended`);
+  const fees    = await fetchJson(`${MEMPOOL_API}/v1/fees/recommended`) as { fastestFee?: number };
   const fastest = fees?.fastestFee ?? 0;
   return {
     fastestFee:  fastest,
@@ -254,7 +266,7 @@ async function fetchMempoolFees(): Promise<{ fastestFee: number; congestion: str
 }
 
 async function fetchBlockHeights(): Promise<{ stacks: number; btc: number }> {
-  const info = await fetchJson(`${HIRO_API}/v2/info`);
+  const info = await fetchJson(`${HIRO_API}/v2/info`) as { stacks_tip_height?: number; burn_block_height?: number };
   return { stacks: info?.stacks_tip_height ?? 0, btc: info?.burn_block_height ?? 0 };
 }
 
@@ -392,7 +404,7 @@ export async function runAudit(threshold = 80): Promise<AuditResult> {
       recommendation,
       alert: score < threshold,
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
     return {
       status:         "error",
       score:          0,
@@ -402,7 +414,7 @@ export async function runAudit(threshold = 80): Promise<AuditResult> {
       breakdown:      null,
       recommendation: "Oracle could not fetch reserve data. Treat as RED — do not proceed with HODLMM operations.",
       alert:          true,
-      error:          err.message,
+      error:          err instanceof Error ? err.message : String(err),
     };
   }
 }
@@ -412,10 +424,10 @@ async function runDoctor(): Promise<void> {
   const checks: { name: string; ok: boolean; detail: string }[] = [];
 
   try {
-    const info = await fetchJson(`${HIRO_API}/v2/info`);
+    const info = await fetchJson(`${HIRO_API}/v2/info`) as { stacks_tip_height?: number };
     checks.push({ name: "Hiro Stacks API", ok: true, detail: `block ${info.stacks_tip_height}` });
-  } catch (e: any) {
-    checks.push({ name: "Hiro Stacks API", ok: false, detail: e.message });
+  } catch (e: unknown) {
+    checks.push({ name: "Hiro Stacks API", ok: false, detail: e instanceof Error ? e.message : String(e) });
   }
 
   try {
@@ -425,29 +437,31 @@ async function runDoctor(): Promise<void> {
       ok:     reserve.btc > 0,
       detail: `${reserve.btc.toFixed(4)} BTC at ${reserve.address}`,
     });
-  } catch (e: any) {
-    checks.push({ name: "sBTC Signer Reserve (Golden Chain)", ok: false, detail: e.message });
+  } catch (e: unknown) {
+    checks.push({ name: "sBTC Signer Reserve (Golden Chain)", ok: false, detail: e instanceof Error ? e.message : String(e) });
   }
 
   try {
-    const tickers = await fetchJson(BITFLOW_TICKER);
+    const tickers = await fetchJson(BITFLOW_TICKER) as unknown[];
     checks.push({ name: "Bitflow Ticker API", ok: Array.isArray(tickers), detail: `${tickers.length} pairs` });
-  } catch (e: any) {
-    checks.push({ name: "Bitflow Ticker API", ok: false, detail: e.message });
+  } catch (e: unknown) {
+    checks.push({ name: "Bitflow Ticker API", ok: false, detail: e instanceof Error ? e.message : String(e) });
   }
 
   try {
-    const fees = await fetchJson(`${MEMPOOL_API}/v1/fees/recommended`);
+    const fees = await fetchJson(`${MEMPOOL_API}/v1/fees/recommended`) as { fastestFee?: number };
     checks.push({ name: "mempool.space", ok: !!fees.fastestFee, detail: `${fees.fastestFee} sat/vB` });
-  } catch (e: any) {
-    checks.push({ name: "mempool.space", ok: false, detail: e.message });
+  } catch (e: unknown) {
+    checks.push({ name: "mempool.space", ok: false, detail: e instanceof Error ? e.message : String(e) });
   }
 
   try {
-    const btc = await fetchJson(`${COINGECKO_API}/simple/price?ids=bitcoin&vs_currencies=usd`);
+    const btc = await fetchJson(`${COINGECKO_API}/simple/price?ids=bitcoin&vs_currencies=usd`) as {
+      bitcoin?: { usd?: number };
+    };
     checks.push({ name: "CoinGecko BTC Price", ok: !!btc.bitcoin?.usd, detail: `BTC $${btc.bitcoin?.usd}` });
-  } catch (e: any) {
-    checks.push({ name: "CoinGecko BTC Price", ok: false, detail: e.message });
+  } catch (e: unknown) {
+    checks.push({ name: "CoinGecko BTC Price", ok: false, detail: e instanceof Error ? e.message : String(e) });
   }
 
   const allOk = checks.every((c) => c.ok);
@@ -496,8 +510,8 @@ program
 
 // Only run CLI when this file is the entry point — not when imported as a module
 if (import.meta.main) {
-  program.parseAsync(process.argv).catch((err: any) => {
-    console.error(JSON.stringify({ status: "error", error: err.message }));
+  program.parseAsync(process.argv).catch((err: unknown) => {
+    console.error(JSON.stringify({ status: "error", error: err instanceof Error ? err.message : String(err) }));
     process.exit(3);
   });
 }

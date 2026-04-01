@@ -20,6 +20,8 @@
  * Output: strict JSON { status, decision, direct_venues, suggested_routes, risk_assessment, profit_gate, action, ... }
  */
 
+import { Command } from "commander";
+
 // ── Safety guardrails (enforced in code, not just docs) ────────────────────
 const MIN_TVL_USD              = 50_000;    // skip pools below this TVL
 const MIN_APY_IMPROVEMENT_PCT  = 1.0;       // never recommend for <1% APY gain
@@ -1074,51 +1076,58 @@ async function runOptimizer(opts: {
   }
 }
 
-// ── CLI ────────────────────────────────────────────────────────────────────
+// ── CLI (Commander.js) ────────────────────────────────────────────────────
 
-const args = process.argv.slice(2);
-const command = args[0] ?? "run";
+const program = new Command();
 
-function getArg(flag: string, fallback: string): string {
-  const idx = args.indexOf(flag);
-  return idx !== -1 && args[idx + 1] ? args[idx + 1] : fallback;
-}
+program
+  .name("usdcx-yield-optimizer")
+  .description("Autonomous USDCx yield deployer for Bitflow — scans HODLMM pools, XYK, and Hermetica")
+  .version("1.0.0");
 
-if (command === "doctor") {
-  runDoctor().catch(err => {
+program
+  .command("doctor")
+  .description("Verify all data sources, dependencies, and readiness")
+  .action(async () => {
+    await runDoctor();
+  });
+
+program
+  .command("install-packs")
+  .description("No additional packs required — self-contained")
+  .action(() => {
+    console.log(JSON.stringify({ status: "ok", message: "No additional packs required — self-contained." }));
+  });
+
+program
+  .command("position")
+  .description("Read on-chain HODLMM positions for a wallet across all USDCx pool contracts")
+  .option("--wallet <address>", "STX wallet address", "SP219TWC8G12CSX5AB093127NC82KYQWEH8ADD1AY")
+  .action(async (opts: { wallet: string }) => {
+    await runPosition(opts.wallet);
+  });
+
+program
+  .command("run", { isDefault: true })
+  .description("Scan all USDCx venues and output ranked recommendations")
+  .option("--amount <usdcx>", "Amount of USDCx to deploy", "0")
+  .option("--risk <level>", "Risk tolerance: low, medium, high", "medium")
+  .option("--from <venue>", "Current venue for profit gate comparison")
+  .option("--confirm", "Generate executable MCP commands (dry-run without this flag)", false)
+  .action(async (opts: { amount: string; risk: string; from?: string; confirm: boolean }) => {
+    const rawRisk = opts.risk;
+    const risk: RiskLevel = ["low", "medium", "high"].includes(rawRisk) ? rawRisk as RiskLevel : "medium";
+    const rawAmount = parseFloat(opts.amount);
+    const amount = isNaN(rawAmount) || rawAmount < 0 ? 0 : rawAmount;
+    const from = opts.from && opts.from.length > 0 ? opts.from : null;
+
+    await runOptimizer({ amount, risk, from, confirm: opts.confirm });
+  });
+
+if (import.meta.main) {
+  program.parseAsync(process.argv).catch((err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
-    console.log(JSON.stringify({ status: "error", error: msg }));
+    console.error(JSON.stringify({ status: "error", error: msg }));
     process.exit(3);
   });
-} else if (command === "install-packs") {
-  console.log(JSON.stringify({ status: "ok", message: "No additional packs required — self-contained." }));
-} else if (command === "position") {
-  const wallet = getArg("--wallet", "SP219TWC8G12CSX5AB093127NC82KYQWEH8ADD1AY");
-  runPosition(wallet).catch(err => {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.log(JSON.stringify({ status: "error", error: msg }));
-    process.exit(3);
-  });
-} else if (command === "run") {
-  const rawRisk = getArg("--risk", "medium");
-  const risk: RiskLevel = ["low", "medium", "high"].includes(rawRisk) ? rawRisk as RiskLevel : "medium";
-
-  const rawAmount = parseFloat(getArg("--amount", "0"));
-  const amount = isNaN(rawAmount) || rawAmount < 0 ? 0 : rawAmount;
-
-  const rawFrom = getArg("--from", "");
-  const from = rawFrom.length > 0 ? rawFrom : null;
-  const confirm = args.includes("--confirm");
-
-  runOptimizer({ amount, risk, from, confirm }).catch(err => {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.log(JSON.stringify({ status: "error", error: msg }));
-    process.exit(3);
-  });
-} else {
-  console.log(JSON.stringify({
-    status: "error",
-    error:  `Unknown command: ${command}. Use: doctor | install-packs | position | run`,
-  }));
-  process.exit(3);
 }

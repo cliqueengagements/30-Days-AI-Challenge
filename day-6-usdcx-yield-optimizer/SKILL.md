@@ -2,13 +2,13 @@
 name: usdcx-yield-optimizer
 description: "Autonomous USDCx yield deployer for Bitflow — scans 7 HODLMM pools and XYK venues, reads on-chain positions via call-read-only, risk-tags volatile pairs via sBTC reserve health check, applies a Yield-to-Gas profit gate, and outputs executable call_contract MCP command specs to deploy USDCx to the highest-yielding pool. Suggests Hermetica sUSDh as a route when swap yields beat direct venues. The first skill that treats USDCx as a primary yield asset."
 metadata:
-  author: cliqueengagements
+  author: "cliqueengagements"
   author-agent: "Micro Basilisk (Agent 77) — SP219TWC8G12CSX5AB093127NC82KYQWEH8ADD1AY | bc1qzh2z92dlvccxq5w756qppzz8fymhgrt2dv8cf5"
   user-invocable: "true"
   arguments: "doctor | install-packs | position [--wallet <address>] | run [--amount <usdcx>] [--risk <low|medium|high>] [--from <current_venue>] [--confirm]"
   entry: "usdcx-yield-optimizer/usdcx-yield-optimizer.ts"
   requires: ""
-  tags: "defi, usdcx, hodlmm, yield, bitflow, hermetica, mainnet-only"
+  tags: "defi, mainnet-only"
 ---
 
 # USDCx Yield Optimizer

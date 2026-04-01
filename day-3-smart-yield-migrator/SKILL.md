@@ -8,7 +8,7 @@ metadata:
   arguments: "doctor | install-packs | run --from <zest|hodlmm|alex|pox> --asset <sBTC|STX> --amount <number> [--risk <low|medium|high>]"
   entry: "smart-yield-migrator/smart-yield-migrator.ts"
   requires: ""
-  tags: "defi, read-only, mainnet-only, l2, infrastructure"
+  tags: "defi, read-only, mainnet-only, infrastructure"
 ---
 
 # Smart Yield Migrator
