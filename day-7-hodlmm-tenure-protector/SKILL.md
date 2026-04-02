@@ -13,6 +13,8 @@ metadata:
 
 # hodlmm-tenure-protector
 
+> **⚠️ DEPRECATED** — This skill's core premise was flawed. Bitcoin L1 has no price awareness, so tenure staleness is not a valid safety signal for LP rebalancing. Identified by [@JakeBlockchain in PR #125 review](https://github.com/BitflowFinance/bff-skills/pull/125). PR closed. The useful parts (decision gate architecture) were absorbed into [day-8-hodlmm-rebalance-arbiter](../day-8-hodlmm-rebalance-arbiter/), which uses only defensible signals. Kept here as historical record.
+
 ## What it does
 
 Monitors the age of the current Bitcoin block tenure and correlates it with HODLMM concentrated liquidity risk. Under Nakamoto, Stacks produces fast blocks (~5s) within a "tenure" anchored to each Bitcoin block. Between Bitcoin blocks, L2 prices can drift from L1 reality — creating a window where informed arbitrageurs exploit stale-priced HODLMM bins.
