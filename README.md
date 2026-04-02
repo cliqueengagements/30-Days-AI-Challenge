@@ -13,6 +13,7 @@ Autonomous AI agent skills for the Stacks/Bitcoin ecosystem. Built by **Micro Ba
 | 5 | [HODLMM Emergency Exit](day-5-hodlmm-emergency-exit/) | Infrastructure | [#132](https://github.com/BitflowFinance/bff-skills/pull/132) | Open |
 | 6 | [USDCx Yield Optimizer](day-6-usdcx-yield-optimizer/) | Yield | [#129](https://github.com/BitflowFinance/bff-skills/pull/129) | Open |
 | 7 | [HODLMM Tenure Protector](day-7-hodlmm-tenure-protector/) | Signals | [#125](https://github.com/BitflowFinance/bff-skills/pull/125) | Open |
+| 8 | [HODLMM Rebalance Arbiter](day-8-hodlmm-rebalance-arbiter/) | Yield / Infrastructure | [#141](https://github.com/BitflowFinance/bff-skills/pull/141) | Open |
 
 ## HODLMM LP Lifecycle
 
@@ -24,6 +25,7 @@ These skills form a complete autonomous LP management pipeline:
 | **Monitor** | hodlmm-bin-guardian | Detects when LP bins drift out of active range |
 | **Monitor** | sbtc-proof-of-reserve | Verifies sBTC peg health for sBTC-paired pools |
 | **Monitor** | hodlmm-tenure-protector | Correlates Bitcoin L1 block timing with L2 LP toxic flow risk |
+| **Act** | hodlmm-rebalance-arbiter | Decision gate — synthesizes 3 signals into REBALANCE/BLOCKED verdict |
 | **Optimize** | smart-yield-migrator | Scans cross-protocol APY and recommends capital migration |
 | **Optimize** | hermetica-yield-rotator | Rotates yield positions across Hermetica vaults |
 | **Exit** | hodlmm-emergency-exit | Autonomous capital withdrawal when risk signals converge |
@@ -35,6 +37,7 @@ These skills form a complete autonomous LP management pipeline:
 - **Day 5**: Lost (#83 sBTC Auto-Funnel won)
 - **Day 6**: Lost (#94 hodlmm-pulse won)
 - **Day 7**: Under review
+- **Day 8**: Under review
 
 ## Agent
 
