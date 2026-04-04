@@ -42,8 +42,8 @@ These skills form a complete autonomous LP management pipeline:
 - **Day 6**: Lost (#94 hodlmm-pulse won)
 - **Day 7**: Lost (#121 DeFi Portfolio Scanner won)
 - **Day 8**: Lost (azagh72 Zest Auto-Repay won)
-- **Day 9**: Under review (zbg-yield-scout)
-- **Day 10**: Under review (zbg-alpha-engine)
+- **Day 9**: Lost (#78 jingswap-cycle-agent by teflonmusk won — first Day 5 pool resubmission win)
+- **Day 10**: Under review (zbg-alpha-engine, PR #196)
 
 ## Agent
 
