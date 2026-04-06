@@ -7,8 +7,8 @@
  * Actions:
  *   assess          — recommend optimal allocation (default, read-only)
  *   stake           — stake USDh into Hermetica vault (requires --confirm)
- *   initiate-unstake — begin 7-day unstake cooldown (requires --confirm)
- *   complete-unstake — redeem USDh after cooldown (requires --confirm)
+ *   unstake          — unstake sUSDh, creates claim in staking-silo (requires --confirm)
+ *   withdraw-claim   — withdraw USDh from silo after 7-day cooldown (requires --confirm)
  *   rotate          — auto-rotate capital to higher-yielding protocol (requires --confirm)
  *
  * Usage:
@@ -16,12 +16,12 @@
  *   bun run hermetica-yield-rotator/hermetica-yield-rotator.ts install-packs
  *   bun run hermetica-yield-rotator/hermetica-yield-rotator.ts run --wallet <STX_ADDRESS>
  *   bun run hermetica-yield-rotator/hermetica-yield-rotator.ts run --wallet <STX_ADDRESS> --action=stake --amount=500 --confirm
- *   bun run hermetica-yield-rotator/hermetica-yield-rotator.ts run --wallet <STX_ADDRESS> --action=initiate-unstake --amount=500 --confirm
- *   bun run hermetica-yield-rotator/hermetica-yield-rotator.ts run --wallet <STX_ADDRESS> --action=complete-unstake --confirm
+ *   bun run hermetica-yield-rotator/hermetica-yield-rotator.ts run --wallet <STX_ADDRESS> --action=unstake --amount=500 --confirm
+ *   bun run hermetica-yield-rotator/hermetica-yield-rotator.ts run --wallet <STX_ADDRESS> --action=withdraw-claim --confirm
  *   bun run hermetica-yield-rotator/hermetica-yield-rotator.ts run --wallet <STX_ADDRESS> --action=rotate --confirm
  *
  * --amount is in human-readable USDh/sUSDh units (e.g. 500 = 500 USDh).
- * Omit --amount with stake/initiate-unstake to default to min(wallet balance, 500 USDh cap).
+ * Omit --amount with stake/unstake to default to min(wallet balance, 500 USDh cap).
  *
  * Output: strict JSON { status, action, data, error }
  */
@@ -82,7 +82,7 @@ interface RotatorState {
   last_exchange_rate:    string;
   last_rotation_at:      string | null;
   last_action:           string | null;
-  unstake_initiated_at:  string | null;   // ISO timestamp when initiate-unstake was last called
+  unstake_initiated_at:  string | null;   // ISO timestamp when unstake was last called
   unstake_amount_raw:    string | null;   // sUSDh raw amount submitted for unstaking
   baseline_run_at:       string | null;   // oldest exchange rate sample for APY window
   baseline_rate:         string | null;   // exchange rate at baseline_run_at
@@ -384,15 +384,16 @@ function stakeCmd(amountRaw: bigint, wallet: string, step: number, exchangeRate?
   };
 }
 
-function initiateUnstakeCmd(amountRaw: bigint, wallet: string, cooldownDays: number, step: number): McpCommand {
+function unstakeCmd(amountRaw: bigint, wallet: string, cooldownDays: number, step: number): McpCommand {
+  // On-chain: staking-v1.unstake(uint) — burns sUSDh, creates a claim in staking-silo-v1-1
   return {
     step,
     tool:        "call_contract",
-    description: `Initiate unstake of ${toHuman(amountRaw, USDH_DECIMALS).toFixed(2)} sUSDh — ${cooldownDays}-day cooldown starts`,
+    description: `Unstake ${toHuman(amountRaw, USDH_DECIMALS).toFixed(2)} sUSDh — creates claim in staking-silo, ${cooldownDays}-day cooldown starts`,
     params: {
       contract_address: HERMETICA,
       contract_name:    "staking-v1",
-      function_name:    "initiate-unstake",
+      function_name:    "unstake",
       function_args:    [encodeUint(amountRaw)],
       // F5: Post-condition — sender must debit exactly amountRaw sUSDh
       post_conditions:  [{
@@ -406,16 +407,18 @@ function initiateUnstakeCmd(amountRaw: bigint, wallet: string, cooldownDays: num
   };
 }
 
-function completeUnstakeCmd(wallet: string, step: number, minUsdhRaw: bigint = 1n): McpCommand {
+function withdrawClaimCmd(wallet: string, step: number, claimId: number | null, minUsdhRaw: bigint = 1n): McpCommand {
+  // On-chain: staking-silo-v1-1.withdraw(uint) — takes claim-id, returns USDh after cooldown
+  const args = claimId !== null ? [encodeUint(BigInt(claimId))] : [];
   return {
     step,
     tool:        "call_contract",
-    description: "Complete unstake — redeem USDh after cooldown window has elapsed",
+    description: `Withdraw USDh from staking-silo claim${claimId !== null ? ` #${claimId}` : ""} — cooldown must be elapsed`,
     params: {
       contract_address: HERMETICA,
-      contract_name:    "staking-v1",
-      function_name:    "complete-unstake",
-      function_args:    [],
+      contract_name:    "staking-silo-v1-1",
+      function_name:    "withdraw",
+      function_args:    args,
       // F5: Post-condition — sender must receive at least minUsdhRaw USDh (gte guards against zero-return exploit)
       post_conditions:  [{
         type:      "ft",
@@ -553,7 +556,7 @@ async function run(opts: {
 }): Promise<void> {
   const { wallet, action = "assess", amount, confirm = false } = opts;
 
-  const writeActions = ["stake", "initiate-unstake", "complete-unstake", "rotate"];
+  const writeActions = ["stake", "unstake", "withdraw-claim", "rotate"];
 
   if (writeActions.includes(action) && !confirm) {
     outputError("CONFIRM_REQUIRED", `--confirm required for action '${action}'`, `Re-run with --confirm to execute.`);
@@ -751,8 +754,9 @@ async function run(opts: {
       return;
     }
 
-    // ── INITIATE-UNSTAKE ───────────────────────────────────────────────────
-    if (action === "initiate-unstake") {
+    // ── UNSTAKE ─────────────────────────────────────────────────────────────
+    // On-chain: staking-v1.unstake(uint) — burns sUSDh, creates claim in staking-silo-v1-1
+    if (action === "unstake") {
       // F1: String-based conversion
       // Safety cap: autonomous default is capped at MAX_AUTONOMOUS_STAKE_USDH — pass --amount to exceed
       const amountRaw = amount
@@ -762,18 +766,19 @@ async function run(opts: {
       if (amountRaw <= 0n) outputError("INVALID_AMOUNT", "Amount must be > 0 sUSDh", "Pass --amount=<susdh> or ensure wallet has sUSDh balance.");
       if (wallet && amountRaw > userSusdh) outputError("INSUFFICIENT_BALANCE", `Amount ${toHuman(amountRaw, USDH_DECIMALS).toFixed(2)} sUSDh exceeds balance ${userSusdhHuman.toFixed(2)}`, "Reduce --amount.");
 
-      const cmd = initiateUnstakeCmd(amountRaw, wallet!, cooldownDays, 1);
+      const cmd = unstakeCmd(amountRaw, wallet!, cooldownDays, 1);
 
       const { baseline_run_at, baseline_rate } = updateBaseline(prev, nowIso, rate);
       console.log(JSON.stringify({
         status: "success",
-        action: `INITIATE_UNSTAKE — ${toHuman(amountRaw, USDH_DECIMALS).toFixed(2)} sUSDh queued for unstake. ${cooldownDays}-day cooldown begins on execution. Run --action=complete-unstake after cooldown.`,
+        action: `UNSTAKE — ${toHuman(amountRaw, USDH_DECIMALS).toFixed(2)} sUSDh unstaked. Claim created in staking-silo-v1-1. ${cooldownDays}-day cooldown begins on execution. Run --action=withdraw-claim after cooldown.`,
         data: {
           mcp_commands:  [cmd],
           amount_susdh:  parseFloat(toHuman(amountRaw, USDH_DECIMALS).toFixed(2)),
           amount_raw:    amountRaw.toString(),
           cooldown_days: cooldownDays,
           ready_after:   `~${cooldownDays} days after execution`,
+          note:          "After cooldown, call staking-silo-v1-1.withdraw(claim-id) to receive USDh.",
         },
         error: null,
       }, null, 2));
@@ -781,7 +786,7 @@ async function run(opts: {
         last_run_at:           nowIso,
         last_exchange_rate:    rate.toString(),
         last_rotation_at:      prev.last_rotation_at ?? null,
-        last_action:           "initiate-unstake",
+        last_action:           "unstake",
         unstake_initiated_at:  nowIso,                // record when cooldown starts
         unstake_amount_raw:    amountRaw.toString(),   // record how much was submitted
         baseline_run_at,
@@ -790,9 +795,10 @@ async function run(opts: {
       return;
     }
 
-    // ── COMPLETE-UNSTAKE ───────────────────────────────────────────────────
-    if (action === "complete-unstake") {
-      // Guard: verify cooldown has elapsed since initiate-unstake
+    // ── WITHDRAW-CLAIM ────────────────────────────────────────────────────
+    // On-chain: staking-silo-v1-1.withdraw(uint) — takes claim-id, returns USDh
+    if (action === "withdraw-claim") {
+      // Guard: verify cooldown has elapsed since unstake
       if (prev.unstake_initiated_at) {
         const initiatedAt  = new Date(prev.unstake_initiated_at).getTime();
         const cooldownMs   = Number(cooldownSecs) * 1000;
@@ -803,7 +809,7 @@ async function run(opts: {
           outputError(
             "COOLDOWN_NOT_ELAPSED",
             `Unstake cooldown not elapsed — ${remainDays} day(s) remaining. Ready at ${readyAt}`,
-            `Wait until ${readyAt} before running complete-unstake.`,
+            `Wait until ${readyAt} before running withdraw-claim.`,
           );
         }
       }
@@ -813,18 +819,19 @@ async function run(opts: {
         ? BigInt(prev.unstake_amount_raw) * rate * 99n / (EXCHANGE_RATE_SCALE * 100n)
         : 1n;
 
-      const cmd = completeUnstakeCmd(wallet!, 1, minUsdhRaw > 0n ? minUsdhRaw : 1n);
+      // claim-id not tracked in state yet — pass null, agent must provide from tx result
+      const cmd = withdrawClaimCmd(wallet!, 1, null, minUsdhRaw > 0n ? minUsdhRaw : 1n);
 
       const { baseline_run_at, baseline_rate } = updateBaseline(prev, nowIso, rate);
       console.log(JSON.stringify({
         status: "success",
-        action: "COMPLETE_UNSTAKE — Redeem USDh from completed cooldown. Execute MCP command to proceed.",
+        action: "WITHDRAW_CLAIM — Withdraw USDh from staking-silo claim. Execute MCP command to proceed.",
         data: {
           mcp_commands:    [cmd],
           min_usdh_expected: prev.unstake_amount_raw
             ? parseFloat(toHuman(minUsdhRaw, USDH_DECIMALS).toFixed(8))
             : null,
-          note: "Post-condition enforces minimum USDh return based on tracked unstake amount and current exchange rate.",
+          note: "Call staking-silo-v1-1.withdraw(claim-id). Claim ID comes from the unstake tx result. Post-condition enforces minimum USDh return.",
         },
         error: null,
       }, null, 2));
@@ -832,8 +839,8 @@ async function run(opts: {
         last_run_at:           nowIso,
         last_exchange_rate:    rate.toString(),
         last_rotation_at:      prev.last_rotation_at ?? null,
-        last_action:           "complete-unstake",
-        unstake_initiated_at:  null,   // clear — unstake completed
+        last_action:           "withdraw-claim",
+        unstake_initiated_at:  null,   // clear — claim withdrawn
         unstake_amount_raw:    null,
         baseline_run_at,
         baseline_rate,
@@ -878,14 +885,14 @@ async function run(opts: {
       const rotateSusdhCappedHuman = toHuman(rotateSusdhCapped, USDH_DECIMALS);
       const rotateUsdhCappedHuman  = toHuman(rotateUsdhCapped,  USDH_DECIMALS);
       const capNote = (userSusdh > MAX_AUTONOMOUS_STAKE_RAW || userUsdh > MAX_AUTONOMOUS_STAKE_RAW)
-        ? ` (capped at ${MAX_AUTONOMOUS_STAKE_USDH} USDh — use --action=stake --amount=X or --action=initiate-unstake --amount=X for larger positions)`
+        ? ` (capped at ${MAX_AUTONOMOUS_STAKE_USDH} USDh — use --action=stake --amount=X or --action=unstake --amount=X for larger positions)`
         : "";
 
       if (hodlmmApr > apyPct + ROTATE_THRESHOLD_PCT) {
         // ── HODLMM wins ────────────────────────────────────────────────────
         if (rotateSusdhCapped > 0n) {
-          cmds.push(initiateUnstakeCmd(rotateSusdhCapped, wallet!, cooldownDays, nextStep++));
-          rotateAction = `ROTATE_TO_HODLMM — HODLMM APR (${hodlmmApr.toFixed(2)}%) beats staking APY (${apyPct.toFixed(2)}%) by ${(hodlmmApr - apyPct).toFixed(2)}%. Step 1: initiate unstake of ${rotateSusdhCappedHuman.toFixed(2)} sUSDh${capNote}. After ${cooldownDays}-day cooldown, run --action=complete-unstake then --action=rotate again to deploy to HODLMM.`;
+          cmds.push(unstakeCmd(rotateSusdhCapped, wallet!, cooldownDays, nextStep++));
+          rotateAction = `ROTATE_TO_HODLMM — HODLMM APR (${hodlmmApr.toFixed(2)}%) beats staking APY (${apyPct.toFixed(2)}%) by ${(hodlmmApr - apyPct).toFixed(2)}%. Step 1: unstake ${rotateSusdhCappedHuman.toFixed(2)} sUSDh (creates claim in silo)${capNote}. After ${cooldownDays}-day cooldown, run --action=withdraw-claim then --action=rotate again to deploy to HODLMM.`;
         } else if (rotateUsdhCapped > 0n && activeBin !== null) {
           cmds.push(swapUsdhToUsdcxCmd(rotateUsdhCappedHuman, nextStep++));
           cmds.push(addLiquidityCmd(rotateUsdhCappedHuman, activeBin, nextStep++));
@@ -935,10 +942,10 @@ async function run(opts: {
         last_exchange_rate:    rate.toString(),
         last_rotation_at:      cmds.length > 0 ? nowIso : prev.last_rotation_at ?? null,
         last_action:           "rotate",
-        unstake_initiated_at:  cmds.some(c => c.tool === "call_contract" && c.params.function_name === "initiate-unstake")
+        unstake_initiated_at:  cmds.some(c => c.tool === "call_contract" && c.params.function_name === "unstake")
           ? nowIso
           : prev.unstake_initiated_at ?? null,
-        unstake_amount_raw:    cmds.some(c => c.tool === "call_contract" && c.params.function_name === "initiate-unstake")
+        unstake_amount_raw:    cmds.some(c => c.tool === "call_contract" && c.params.function_name === "unstake")
           ? rotateSusdhCapped.toString()
           : prev.unstake_amount_raw ?? null,
         baseline_run_at,
@@ -986,7 +993,7 @@ program
   .command("run")
   .description("Assess yield allocation or execute rotation action")
   .option("--wallet <address>",  "STX wallet address")
-  .option("--action <action>",   "assess|stake|initiate-unstake|complete-unstake|rotate (default: assess)")
+  .option("--action <action>",   "assess|stake|unstake|withdraw-claim|rotate (default: assess)")
   .option("--amount <usdh>",     "Human-readable USDh/sUSDh amount (e.g. 500). Omit to use full balance.")
   .option("--confirm",           "Required for write actions")
   .action((opts: { wallet?: string; action?: string; amount?: string; confirm?: boolean }) =>

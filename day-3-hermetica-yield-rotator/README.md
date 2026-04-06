@@ -18,7 +18,7 @@ hermetica-yield-rotator
 ## What it does
 Cross-protocol yield rotator for Stacks mainnet. Monitors Hermetica USDh staking APY against Bitflow HODLMM dlmm_1 APR from live on-chain data — querying five Hermetica contracts and the Bitflow App API — and executes capital rotation to the higher-yielding protocol when the differential exceeds a 2% threshold.
 
-Features write-capable MCP command outputs for stake, initiate-unstake, complete-unstake, and rotate actions with guardrails including --confirm gates, 500 USDh spend cap, STX gas verification, and preflight checks.
+Features write-capable MCP command outputs for stake, unstake, withdraw-claim, and rotate actions with guardrails including --confirm gates, 500 USDh spend cap, STX gas verification, and preflight checks.
 
 **Rotation pipeline:** When rotating to HODLMM, the skill first swaps USDh → USDCx via `bitflow_swap` (dlmm_1 accepts USDCx, not USDh), then deposits USDCx into the HODLMM pool via `bitflow_hodlmm_add_liquidity`.
 
@@ -130,7 +130,7 @@ Documentation fixes per @TheBigMacBTC:
 
 - **Hardcoded 500 USDh autonomous spend cap** enforced in code at `MAX_AUTONOMOUS_STAKE_USDH = 500`
 - **Doctor-first preflight** — write actions abort with `PREFLIGHT_FAILED` if Hermetica contracts unreachable
-- **All write actions require `--confirm`** — stake, initiate-unstake, complete-unstake, rotate
+- **All write actions require `--confirm`** — stake, unstake, withdraw-claim, rotate
 - **STX gas check** — refused if wallet STX < 10,000 µSTX
 - **Post-conditions** — sUSDh credit FT `gte` post-condition with 1% slippage; tx reverts on-chain if short
 - **2% rotation threshold** + **30-min cooldown** prevent churn
@@ -149,6 +149,23 @@ bun run scripts/validate-frontmatter.ts skills/hermetica-yield-rotator
 ────────────────────────────────────────────────────────────
 Skills validated: 1 | Errors: 0 | Warnings: 0 | ALL PASSED ✅
 ```
+
+### Bug fix: wrong unstake function names (2026-04-06)
+
+The original merged PR #56 used `initiate-unstake` and `complete-unstake` as on-chain function names — **these functions do not exist** on the Hermetica staking-v1 contract. The actual on-chain interface is:
+
+| Action | Wrong (PR #56) | Correct (fixed) |
+|--------|---------------|-----------------|
+| Unstake sUSDh | `staking-v1.initiate-unstake(uint)` | `staking-v1.unstake(uint)` |
+| Withdraw USDh | `staking-v1.complete-unstake()` | `staking-silo-v1-1.withdraw(claim-id)` |
+
+The fix changes:
+- `initiateUnstakeCmd` → `unstakeCmd` — calls `staking-v1.unstake(uint)`, which burns sUSDh and creates a claim in `staking-silo-v1-1`
+- `completeUnstakeCmd` → `withdrawClaimCmd` — calls `staking-silo-v1-1.withdraw(claim-id)` (different contract), which returns USDh after the 7-day cooldown
+- CLI actions renamed: `initiate-unstake` → `unstake`, `complete-unstake` → `withdraw-claim`
+- All state tracking, rotate handler references, and docs updated
+
+Bug flagged as comment on [aibtcdev/skills#273](https://github.com/aibtcdev/skills/pull/273) by @microbasilisk.
 
 ## Known constraints
 - Estimated APY returns null for ~1 hour post-first-run (needs exchange rate history)

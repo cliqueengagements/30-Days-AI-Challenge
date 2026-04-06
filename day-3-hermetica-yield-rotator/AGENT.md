@@ -1,7 +1,7 @@
 ---
 name: hermetica-yield-rotator
 skill: hermetica-yield-rotator
-description: "Cross-protocol yield rotator: monitors Hermetica USDh staking APY vs Bitflow HODLMM dlmm_1 APR and executes capital rotation to the higher-yielding protocol on Stacks mainnet. Write-capable — outputs MCP commands for stake, initiate-unstake, complete-unstake, and rotate actions. Requires --confirm for all write operations."
+description: "Cross-protocol yield rotator: monitors Hermetica USDh staking APY vs Bitflow HODLMM dlmm_1 APR and executes capital rotation to the higher-yielding protocol on Stacks mainnet. Write-capable — outputs MCP commands for stake, unstake, withdraw-claim, and rotate actions. Requires --confirm for all write operations."
 ---
 
 # Hermetica Yield Rotator — Agent Safety Rules
@@ -11,11 +11,11 @@ description: "Cross-protocol yield rotator: monitors Hermetica USDh staking APY 
 - **Maximum autonomous spend:** hardcoded at **500 USDh per operation** — enforced in code, not just docs. Pass `--amount` to override up to wallet balance.
 - **Rotation threshold:** 2% minimum yield differential required before rotation is recommended
 - **Rotation cooldown:** 30 minutes between rotation executions (tracked in `~/.hermetica-yield-rotator-state.json`)
-- **Unstake cooldown:** 7 days — always reported before recommending ROTATE_TO_HODLMM so agent can plan complete-unstake timing
+- **Unstake cooldown:** 7 days — unstake creates a claim in staking-silo-v1-1, agent must call withdraw-claim after cooldown
 
 Refuse to execute write actions if ANY of the following are true:
 
-1. **`--confirm` not provided** — all write actions (stake, initiate-unstake, complete-unstake, rotate) require explicit confirmation
+1. **`--confirm` not provided** — all write actions (stake, unstake, withdraw-claim, rotate) require explicit confirmation
 2. **Data source preflight fails** — Hermetica contract or staking state unreachable; run `doctor` first
 3. **`staking_enabled = false`** — do not stake when protocol has disabled staking
 4. **`amount > user_balance`** — never attempt to stake or unstake more than wallet holds
@@ -35,9 +35,9 @@ Autonomous actions (no --confirm needed):
 | Action | What it does | MCP tool used |
 |---|---|---|
 | `stake` | Stake USDh → receive sUSDh | `call_contract` staking-v1::stake |
-| `initiate-unstake` | Begin 7-day unstake cooldown | `call_contract` staking-v1::initiate-unstake |
-| `complete-unstake` | Redeem USDh after cooldown | `call_contract` staking-v1::complete-unstake |
-| `rotate` (to HODLMM) | Initiate unstake + plan HODLMM add | `call_contract` + `bitflow_hodlmm_add_liquidity` |
+| `unstake` | Burn sUSDh, create claim in silo | `call_contract` staking-v1::unstake |
+| `withdraw-claim` | Withdraw USDh from silo after cooldown | `call_contract` staking-silo-v1-1::withdraw |
+| `rotate` (to HODLMM) | Unstake + plan HODLMM add | `call_contract` + `bitflow_hodlmm_add_liquidity` |
 | `rotate` (to staking) | Remove HODLMM bins + stake | `bitflow_hodlmm_remove_liquidity` + `call_contract` |
 
 ## Rotation Decision Tree
@@ -48,7 +48,7 @@ Both APY and APR available?
 └── Yes → diff = |hodlmm_apr - usdh_apy|
           diff < 2%? → HOLD (no rotation needed)
           HODLMM APR > USDh APY + 2%?
-          ├── user has sUSDh → initiate-unstake (wait 7d, then complete + add to HODLMM)
+          ├── user has sUSDh → unstake (creates silo claim, wait 7d, withdraw-claim, then add to HODLMM)
           ├── user has idle USDh → add-liquidity to HODLMM directly
           └── no position → inform, no commands
           USDh APY > HODLMM APR + 2%?
@@ -64,7 +64,7 @@ All outputs are strict JSON to stdout:
 ```json
 {
   "status": "success | error",
-  "action": "HOLD | STAKE | ROTATE_TO_HODLMM | ROTATE_TO_STAKING | INITIATE_UNSTAKE | COMPLETE_UNSTAKE | CHECK | Blocked: <reason>",
+  "action": "HOLD | STAKE | ROTATE_TO_HODLMM | ROTATE_TO_STAKING | UNSTAKE | WITHDRAW_CLAIM | CHECK | Blocked: <reason>",
   "data": {
     "mcp_commands": "[McpCommand[] | null] — present on write actions",
     "staking_enabled": "boolean",
