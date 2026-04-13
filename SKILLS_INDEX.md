@@ -16,3 +16,8 @@ Tracking all skills built during the 30 Days AI Challenge.
 | 10 | [zbg-alpha-engine](day-10-zbg-alpha-engine/) | Closed — superseded by #213 | #196 |
 | 11 | — | Rest day | — |
 | 12 | [stacks-alpha-engine](day-12-stacks-alpha-engine/) | Open — reviewed, arc0btc sign-off | #213 |
+| 13 | — | No submission | — |
+| 14 | hodlmm-move-liquidity | Merged — Day 14 Winner | #231 |
+| 15 | sbtc-capital-allocator | Open | #244 |
+| 16-18 | — | No submissions | — |
+| 19 | [bns-agent-manager](day-19-bns-agent-manager/) | Open — Day 19 submission | #294 |
