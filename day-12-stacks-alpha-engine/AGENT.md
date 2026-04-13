@@ -45,7 +45,7 @@ description: "Autonomous yield executor that scans 6 tokens across 4 Stacks DeFi
 - Persisted to `~/.stacks-alpha-engine-state.json`
 
 ### Non-Atomic Operations
-- Swap-then-deploy = swap (tx 1) + deposit (tx 2)
+- Swap-then-deploy = DLMM swap via `dlmm-swap-router-v-1-1.swap-simple-multi` (tx 1) + deposit (tx 2)
 - HODLMM rebalance = withdraw (tx 1) + re-add (tx 2)
 - If tx 1 confirms but tx 2 fails: capital is safe in wallet
 - Agent should retry tx 2 before reporting failure
@@ -59,17 +59,17 @@ description: "Autonomous yield executor that scans 6 tokens across 4 Stacks DeFi
 - Currently low utilization — APY may be 0%. Skip in recommendations unless user forces.
 
 ### Hermetica
-- Stake USDh via `call_contract` -> `staking-v1.stake(amount: uint)`
-- Unstake via `staking-v1.unstake(amount: uint)` -> creates claim in silo
+- Stake USDh via `call_contract` -> `staking-v1-1.stake(amount: uint, affiliate: none)`
+- Unstake via `staking-v1-1.unstake(amount: uint)` -> creates claim in silo
 - Claim USDh via `staking-silo-v1-1.withdraw(claim-id: uint)` after 7-day cooldown
-- If user has sBTC/USDCx but no USDh: generate swap-then-stake instructions
+- If user has sBTC/USDCx but no USDh: generate DLMM swap + stake instructions (both `call_contract`)
 - Exchange rate > 1.0 indicates accumulated yield
 
 ### Granite
 - **Accepts aeUSDC only** (NOT sBTC, NOT USDCx)
 - Deposit via `call_contract` -> `liquidity-provider-v1.deposit(assets: uint, recipient: principal)`
-- Withdraw via `liquidity-provider-v1.withdraw(assets: uint, recipient: principal)`
-- If user has USDCx but no aeUSDC: generate swap-then-deposit instructions
+- Withdraw via `liquidity-provider-v1.redeem(shares: uint, recipient: principal)` (ERC-4626 shares, not assets)
+- If user has USDCx but no aeUSDC: generate DLMM swap + deposit instructions (both `call_contract`)
 - Borrower path (add-collateral) is **blocked** by trait_reference — do not attempt
 
 ### HODLMM (Bitflow DLMM)

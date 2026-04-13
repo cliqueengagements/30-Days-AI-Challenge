@@ -17,7 +17,7 @@
  *
  * Protocols & tokens:
  *   Zest      — supply sBTC, wSTX, stSTX, USDC, USDh  (MCP native zest_supply/withdraw)
- *   Hermetica — stake USDh -> sUSDh                     (call_contract staking-v1)
+ *   Hermetica — stake USDh -> sUSDh                     (call_contract staking-v1-1)
  *   Granite   — deposit aeUSDC to LP                    (call_contract liquidity-provider-v1)
  *   HODLMM    — LP in sBTC/STX/USDCx/USDh/aeUSDC pools (Bitflow skill)
  *
@@ -73,13 +73,17 @@ const ZEST_VAULT_SBTC     = "SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-vault-
 
 // Hermetica
 const HERMETICA           = "SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG";
-const HERMETICA_STAKING   = `${HERMETICA}.staking-v1`;
+const HERMETICA_STAKING   = `${HERMETICA}.staking-v1-1`;
 const HERMETICA_SILO      = `${HERMETICA}.staking-silo-v1-1`;
 
 // Granite
 const GRANITE_STATE       = "SP35E2BBMDT2Y1HB0NTK139YBGYV3PAPK3WA8BRNA.state-v1";
 const GRANITE_IR          = "SP35E2BBMDT2Y1HB0NTK139YBGYV3PAPK3WA8BRNA.linear-kinked-ir-v1";
 const GRANITE_LP          = "SP26NGV9AFZBX7XBDBS2C7EC7FCPSAV9PKREQNMVS.liquidity-provider-v1";
+
+// Bitflow DLMM swap router
+const DLMM_SWAP_ROUTER    = "SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD";
+const DLMM_SWAP_ROUTER_NAME = "dlmm-swap-router-v-1-1";
 
 // HODLMM
 const DLMM_CORE           = "SP1PFR4V08H1RAZXREBGFFQ59WB739XM8VVGTFSEA.dlmm-core-v-1-1";
@@ -526,23 +530,28 @@ async function scoutHermetica(wallet: string): Promise<{ position: HermeticaPosi
     // Read exchange rate (USDh per sUSDh) and staking status
     const [rateResult, enabledResult] = await Promise.all([
       callReadOnly(HERMETICA_STAKING, "get-usdh-per-susdh", []),
-      // staking-v1 doesn't have an explicit "is-enabled" but stake will fail if paused
+      // staking-v1-1 doesn't have an explicit "is-enabled" but stake will fail if paused
       // We just read the rate as proof the contract is live
       Promise.resolve({ okay: true }),
     ]);
     sources.push("hermetica-staking");
 
-    const RATE_SCALE = 1e18; // exchange rate precision
+    const RATE_SCALE = 1e8; // exchange rate precision — Hermetica usdh-base = (pow u10 u8)
     let exchangeRate = 1.0;
     if (rateResult.okay && rateResult.result) {
       const raw = parseUint128Hex(rateResult.result);
       exchangeRate = Number(raw) / RATE_SCALE;
     }
 
-    // Estimate APY from exchange rate drift (rate > 1.0 means yield has accrued)
-    // Simple formula: if rate = 1.05 after ~365 days, APY ~ 5%
-    // We report the rate and let the yield table use Bitflow data for more accuracy
-    const apyEstimate = round(Math.max(0, (exchangeRate - 1.0) * 100), 2);
+    // Annualize APY from exchange rate drift using staking-v1-1 deployment date.
+    // staking-v1-1 deployed at burn block 914980 (Sept 16 2025). The exchange rate
+    // reflects cumulative yield since then — we must annualize, not report raw.
+    const STAKING_V1_1_DEPLOY_TS = 1758041467; // burn_block_time of deploy tx
+    const nowTs = Math.floor(Date.now() / 1000);
+    const daysSinceDeploy = Math.max(1, (nowTs - STAKING_V1_1_DEPLOY_TS) / 86400);
+    const apyEstimate = exchangeRate > 1.0
+      ? round((Math.pow(exchangeRate, 365 / daysSinceDeploy) - 1) * 100, 2)
+      : 0;
 
     // Check user's sUSDh balance from wallet scan (already read in hiroBalance)
     // We just report the rate here; balance comes from the wallet scan
@@ -1042,6 +1051,79 @@ interface ExecuteInstruction {
   description: string;
 }
 
+// -- Bitflow DLMM swap routes ---------------------------------------------------
+// Maps (tokenIn, tokenOut) to the DLMM pool and direction for swap-simple-multi.
+// Each route is a single-hop swap through a known Bitflow DLMM pool.
+interface DlmmSwapRoute {
+  pool: string;     // pool contract principal
+  xToken: string;   // x-token-trait principal (the pool's X token contract)
+  yToken: string;   // y-token-trait principal (the pool's Y token contract)
+  xForY: boolean;   // true = selling X for Y, false = selling Y for X
+}
+
+function getDlmmSwapRoute(tokenIn: string, tokenOut: string): DlmmSwapRoute | null {
+  // USDCx → aeUSDC (pool: aeUSDC/USDCx, selling Y for X)
+  if ((tokenIn === "usdcx" || tokenIn === "stx") && tokenOut === "aeusdc") {
+    return {
+      pool: "SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD.dlmm-pool-aeusdc-usdcx-v-1-bps-1",
+      xToken: AEUSDC_TOKEN, yToken: USDCX_TOKEN, xForY: false,
+    };
+  }
+  // USDCx → USDh (pool: USDh/USDCx, selling Y for X)
+  if ((tokenIn === "usdcx" || tokenIn === "stx") && tokenOut === "usdh") {
+    return {
+      pool: "SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD.dlmm-pool-usdh-usdcx-v-1-bps-1",
+      xToken: USDH_TOKEN, yToken: USDCX_TOKEN, xForY: false,
+    };
+  }
+  // sBTC → USDCx (pool: sBTC/USDCx 10bps, selling X for Y)
+  if (tokenIn === "sbtc" && tokenOut === "usdcx") {
+    return {
+      pool: "SM1FKXGNZJWSTWDWXQZJNF7B5TV5ZB235JTCXYXKD.dlmm-pool-sbtc-usdcx-v-1-bps-10",
+      xToken: SBTC_TOKEN, yToken: USDCX_TOKEN, xForY: true,
+    };
+  }
+  return null;
+}
+
+// Default slippage by pair volatility profile.
+// Stable-stable pairs use tight tolerance; volatile pairs need more room.
+function defaultSlippagePct(route: DlmmSwapRoute): number {
+  const stable = [USDCX_TOKEN, AEUSDC_TOKEN, USDH_TOKEN];
+  const bothStable = stable.includes(route.xToken) && stable.includes(route.yToken);
+  return bothStable ? 0.5 : 3;
+}
+
+// Build a call_contract instruction for a Bitflow DLMM swap.
+// Uses swap-simple-multi with a single swap in the list.
+function buildDlmmSwapInstruction(route: DlmmSwapRoute, amount: number, slippagePct?: number): ExecuteInstruction {
+  slippagePct = slippagePct ?? defaultSlippagePct(route);
+  const minReceived = Math.floor(amount * (1 - slippagePct / 100));
+  return {
+    tool: "call_contract",
+    params: {
+      contractAddress: DLMM_SWAP_ROUTER,
+      contractName: DLMM_SWAP_ROUTER_NAME,
+      functionName: "swap-simple-multi",
+      functionArgs: [{
+        type: "list", value: [{
+          type: "tuple", value: {
+            amount: { type: "uint", value: String(amount) },
+            "max-steps": { type: "uint", value: "6" },
+            "min-received": { type: "uint", value: String(minReceived) },
+            "pool-trait": { type: "principal", value: route.pool },
+            "x-for-y": { type: "bool", value: route.xForY },
+            "x-token-trait": { type: "principal", value: route.xToken },
+            "y-token-trait": { type: "principal", value: route.yToken },
+          },
+        }],
+      }],
+      postConditionMode: "allow",
+    },
+    description: `Swap ${amount} via Bitflow DLMM (${route.xForY ? "X→Y" : "Y→X"}, min-received: ${minReceived}, ${slippagePct}% slippage)`,
+  };
+}
+
 function buildDeployInstructions(protocol: Protocol, amount: number, token: string, scout: ScoutResult): ExecuteInstruction[] {
   const instructions: ExecuteInstruction[] = [];
   const wallet = scout.wallet;
@@ -1056,31 +1138,35 @@ function buildDeployInstructions(protocol: Protocol, amount: number, token: stri
       break;
 
     case "hermetica": {
-      // If user has USDh, stake directly
-      // If not, need swap first
+      // Hermetica staking-v1 is deactivated (HQ ERR_INACTIVE_CONTRACT u1006).
+      // staking-v1-1 is the active contract. It takes an additional `affiliate` arg (optional buff 64).
+      // Staking mints sUSDh back to the caller — postConditionMode must be "allow"
+      // because the sUSDh mint is not covered by the outgoing USDh post-condition.
       if (token === "usdh") {
         instructions.push({
           tool: "call_contract",
           params: {
-            contractAddress: HERMETICA.split(".")[0] ?? HERMETICA,
-            contractName: "staking-v1",
+            contractAddress: HERMETICA,
+            contractName: "staking-v1-1",
             functionName: "stake",
-            functionArgs: [{ type: "uint", value: amount }],
-            postConditions: [{
-              type: "ft", principal: wallet,
-              asset: USDH_TOKEN, assetName: "usdh-token",
-              conditionCode: "lte", amount: String(amount),
-            }],
+            functionArgs: [{ type: "uint", value: amount }, null],
+            postConditionMode: "allow",
+            // allow mode required: staking mints sUSDh back to caller (not expressible as sender-side PC).
+            // Belt-and-suspenders: outgoing USDh transfer is still asserted.
+            postConditions: [
+              { type: "ft", principal: wallet, asset: USDH_TOKEN, assetName: "usdh-token", conditionCode: "lte", amount },
+            ],
           },
           description: `Stake ${amount} USDh into Hermetica sUSDh (earning yield)`,
         });
       } else {
-        // Need to swap to USDh first
-        instructions.push({
-          tool: "bitflow:bitflow",
-          params: { action: "swap", tokenIn: token, tokenOut: "usdh", amount: String(amount) },
-          description: `Step 1: Swap ${amount} ${token} -> USDh on Bitflow`,
-        });
+        // Need to swap to USDh first via Bitflow DLMM router
+        const swapRoute = getDlmmSwapRoute(token, "usdh");
+        if (!swapRoute) {
+          instructions.push({ tool: "info", params: {}, description: `No DLMM swap route from ${token} to USDh. Acquire USDh manually.` });
+          break;
+        }
+        instructions.push(buildDlmmSwapInstruction(swapRoute, amount));
         // Step 2 amount depends on Step 1 swap output — use input amount as estimate
         // Agent must read swap tx result and substitute actual received amount before executing
         const hermeticaEstimate = String(amount);
@@ -1088,14 +1174,15 @@ function buildDeployInstructions(protocol: Protocol, amount: number, token: stri
           tool: "call_contract",
           params: {
             contractAddress: HERMETICA,
-            contractName: "staking-v1",
+            contractName: "staking-v1-1",
             functionName: "stake",
-            functionArgs: [{ type: "uint", value: hermeticaEstimate }],
-            postConditions: [{
-              type: "ft", principal: wallet,
-              asset: USDH_TOKEN, assetName: "usdh-token",
-              conditionCode: "lte", amount: hermeticaEstimate,
-            }],
+            functionArgs: [{ type: "uint", value: hermeticaEstimate }, null],
+            postConditionMode: "allow",
+            // allow mode required: staking mints sUSDh (not expressible as sender-side PC).
+            // Belt-and-suspenders: outgoing USDh transfer is still asserted.
+            postConditions: [
+              { type: "ft", principal: wallet, asset: USDH_TOKEN, assetName: "usdh-token", conditionCode: "lte", amount: hermeticaEstimate },
+            ],
             _note: "SEQUENTIAL: execute after Step 1 confirms. Replace amount with actual swap output from tx receipt.",
           },
           description: `Step 2: Stake ~${hermeticaEstimate} USDh into Hermetica sUSDh (adjust amount from Step 1 output)`,
@@ -1106,6 +1193,8 @@ function buildDeployInstructions(protocol: Protocol, amount: number, token: stri
 
     case "granite":
       // Granite LP accepts aeUSDC only
+      // Deposit mints LP tokens back to the caller — postConditionMode must be "allow"
+      // because the LP token mint is not covered by the outgoing aeUSDC post-condition.
       if (token === "aeusdc") {
         instructions.push({
           tool: "call_contract",
@@ -1117,21 +1206,23 @@ function buildDeployInstructions(protocol: Protocol, amount: number, token: stri
               { type: "uint", value: amount },
               { type: "principal", value: wallet },
             ],
-            postConditions: [{
-              type: "ft", principal: wallet,
-              asset: AEUSDC_TOKEN, assetName: "bridged-usdc",
-              conditionCode: "lte", amount: String(amount),
-            }],
+            postConditionMode: "allow",
+            // allow mode required: deposit mints LP tokens back to caller (not expressible as sender-side PC).
+            // Belt-and-suspenders: outgoing aeUSDC transfer is still asserted.
+            postConditions: [
+              { type: "ft", principal: wallet, asset: AEUSDC_TOKEN, assetName: "bridged-usdc", conditionCode: "lte", amount },
+            ],
           },
           description: `Deposit ${amount} aeUSDC to Granite lending pool`,
         });
       } else {
-        // Need swap to aeUSDC first
-        instructions.push({
-          tool: "bitflow:bitflow",
-          params: { action: "swap", tokenIn: token, tokenOut: "aeusdc", amount: String(amount) },
-          description: `Step 1: Swap ${amount} ${token} -> aeUSDC on Bitflow`,
-        });
+        // Need swap to aeUSDC first via Bitflow DLMM router
+        const swapRoute = getDlmmSwapRoute(token, "aeusdc");
+        if (!swapRoute) {
+          instructions.push({ tool: "info", params: {}, description: `No DLMM swap route from ${token} to aeUSDC. Acquire aeUSDC manually.` });
+          break;
+        }
+        instructions.push(buildDlmmSwapInstruction(swapRoute, amount));
         // Step 2 amount depends on Step 1 swap output — use input amount as estimate
         // Agent must read swap tx result and substitute actual received amount before executing
         const graniteEstimate = String(amount);
@@ -1145,11 +1236,12 @@ function buildDeployInstructions(protocol: Protocol, amount: number, token: stri
               { type: "uint", value: graniteEstimate },
               { type: "principal", value: wallet },
             ],
-            postConditions: [{
-              type: "ft", principal: wallet,
-              asset: AEUSDC_TOKEN, assetName: "bridged-usdc",
-              conditionCode: "lte", amount: graniteEstimate,
-            }],
+            postConditionMode: "allow",
+            // allow mode required: deposit mints LP tokens (not expressible as sender-side PC).
+            // Belt-and-suspenders: outgoing aeUSDC transfer is still asserted.
+            postConditions: [
+              { type: "ft", principal: wallet, asset: AEUSDC_TOKEN, assetName: "bridged-usdc", conditionCode: "lte", amount: graniteEstimate },
+            ],
             _note: "SEQUENTIAL: execute after Step 1 confirms. Replace amount with actual swap output from tx receipt.",
           },
           description: `Step 2: Deposit ~${graniteEstimate} aeUSDC to Granite lending pool (adjust amount from Step 1 output)`,
@@ -1190,6 +1282,9 @@ function buildWithdrawInstructions(protocol: Protocol, scout: ScoutResult): Exec
 
     case "hermetica": {
       // unstake sUSDh -> creates claim in silo -> withdraw after cooldown
+      // staking-v1-1 is the active contract (staking-v1 is deactivated)
+      // Unstake burns sUSDh and creates a claim — postConditionMode must be "allow"
+      // because the sUSDh burn is not expressible as a sender-side post-condition.
       const susdhSats = Math.floor(scout.balances.susdh.amount * 1e8);
       if (susdhSats <= 0) return [{ tool: "info", params: {}, description: "No sUSDh position to withdraw" }];
       return [
@@ -1197,14 +1292,15 @@ function buildWithdrawInstructions(protocol: Protocol, scout: ScoutResult): Exec
           tool: "call_contract",
           params: {
             contractAddress: HERMETICA,
-            contractName: "staking-v1",
+            contractName: "staking-v1-1",
             functionName: "unstake",
             functionArgs: [{ type: "uint", value: susdhSats }],
-            postConditions: [{
-              type: "ft", principal: wallet,
-              asset: SUSDH_TOKEN, assetName: "susdh-token",
-              conditionCode: "lte", amount: String(susdhSats),
-            }],
+            postConditionMode: "allow",
+            // allow mode required: unstake burns sUSDh and creates a claim (not expressible as sender-side PC).
+            // Belt-and-suspenders: outgoing sUSDh transfer is still asserted.
+            postConditions: [
+              { type: "ft", principal: wallet, asset: SUSDH_TOKEN, assetName: "susdh-token", conditionCode: "lte", amount: String(susdhSats) },
+            ],
           },
           description: `Unstake ${susdhSats} sUSDh (creates claim in staking-silo)`,
         },
@@ -1555,7 +1651,7 @@ async function runDoctor(): Promise<void> {
   // 9. Hermetica staking
   try {
     const rr = await callReadOnly(HERMETICA_STAKING, "get-usdh-per-susdh", []);
-    const rate = rr.okay && rr.result ? Number(parseUint128Hex(rr.result)) / 1e18 : 0;
+    const rate = rr.okay && rr.result ? Number(parseUint128Hex(rr.result)) / 1e8 : 0;
     checks.push({ name: "Hermetica Staking", ok: rr.okay && rate > 0, detail: `exchange rate: ${round(rate, 6)} USDh/sUSDh` });
   } catch (e: unknown) { checks.push({ name: "Hermetica Staking", ok: false, detail: e instanceof Error ? e.message : String(e) }); }
 
