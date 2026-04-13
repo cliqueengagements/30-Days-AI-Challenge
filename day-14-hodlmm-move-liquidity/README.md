@@ -1,3 +1,5 @@
+# Day 14 Hodlmm Move Liquidity
+
 ## Skill Name
 
 HODLMM Move-Liquidity & Auto-Rebalancer
@@ -163,3 +165,4 @@ All 3 findings from BigMac + arc addressed:
 - Liquidity distributed across ±spread bins (default ±5). DLMM bin invariant enforced: below-active → offsets [-spread, 0], above-active → offsets [0, +spread].
 - Bins very close to active with residual mixed tokens (tiny X in Y-only bins) may need `--force` with the default spread or a move to offset 0. This is an edge case — truly drifted positions have clean single-token bins.
 - Bitflow API fields use snake_case exclusively — no camelCase fallbacks. If the API schema changes, the skill fails loudly rather than silently using wrong fields.
+

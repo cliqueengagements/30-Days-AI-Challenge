@@ -1,3 +1,5 @@
+# Day 15 Sbtc Capital Allocator
+
 This skill is a submission for #Skill Idea 2 - sBTC Yield Maximizer
 
 ## Skill Name
@@ -202,3 +204,4 @@ The skill is architected to be modular: adding a third, fourth, or fifth protoco
 - Skill emits MCP commands but doesn't call contracts directly
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
