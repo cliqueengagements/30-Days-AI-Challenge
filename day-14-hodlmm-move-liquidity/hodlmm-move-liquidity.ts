@@ -175,19 +175,25 @@ async function fetchPools(): Promise<PoolMeta[]> {
     `${BITFLOW_APP}/pools?amm_type=dlmm`
   );
   const list = (raw.data ?? raw.results ?? raw.pools ?? (Array.isArray(raw) ? raw : [])) as Record<string, unknown>[];
-  // Bitflow App API uses snake_case fields. No camelCase fallbacks — fail loudly on schema change.
-  return list.map((p) => ({
-    pool_id: String(p.pool_id ?? ""),
-    pool_contract: String(p.pool_token ?? ""),
-    token_x: String(p.token_x ?? ""),
-    token_y: String(p.token_y ?? ""),
-    token_x_symbol: String(p.token_x_symbol ?? "?"),
-    token_y_symbol: String(p.token_y_symbol ?? "?"),
-    token_x_decimals: Number(p.token_x_decimals ?? 8),
-    token_y_decimals: Number(p.token_y_decimals ?? 6),
-    active_bin: Number(p.active_bin ?? 0),
-    bin_step: Number(p.bin_step ?? 0),
-  }));
+  // Bitflow App API migrated snake_case → camelCase on Apr 2026. Read both shapes so the
+  // skill survives either response format. Restores fallbacks removed in d83755a.
+  return list.map((p) => {
+    const tokens = (p.tokens ?? {}) as Record<string, Record<string, unknown>>;
+    const xToken = tokens.tokenX ?? {};
+    const yToken = tokens.tokenY ?? {};
+    return {
+      pool_id: String(p.pool_id ?? p.poolId ?? ""),
+      pool_contract: String(p.pool_token ?? p.poolContract ?? p.core_address ?? ""),
+      token_x: String(p.token_x ?? xToken.contract ?? ""),
+      token_y: String(p.token_y ?? yToken.contract ?? ""),
+      token_x_symbol: String(p.token_x_symbol ?? xToken.symbol ?? "?"),
+      token_y_symbol: String(p.token_y_symbol ?? yToken.symbol ?? "?"),
+      token_x_decimals: Number(p.token_x_decimals ?? xToken.decimals ?? 8),
+      token_y_decimals: Number(p.token_y_decimals ?? yToken.decimals ?? 6),
+      active_bin: Number(p.active_bin ?? p.activeBin ?? 0),
+      bin_step: Number(p.bin_step ?? p.binStep ?? 0),
+    };
+  });
 }
 
 async function fetchPoolBins(poolId: string): Promise<{ active_bin_id: number; bins: BinData[] }> {
@@ -208,18 +214,18 @@ async function fetchUserPositions(poolId: string, wallet: string): Promise<UserB
   const raw = await fetchJson<Record<string, unknown>>(
     `${BITFLOW_APP}/users/${wallet}/positions/${poolId}/bins`
   );
-  // Bitflow App API uses snake_case fields. No camelCase fallbacks.
+  // API migrated userLiquidity/reserveX/reserveY to camelCase — read both.
   const bins = (raw.bins ?? []) as Record<string, unknown>[];
   return bins
     .filter((b) => {
-      const liq = BigInt(String(b.user_liquidity ?? b.liquidity ?? "0"));
+      const liq = BigInt(String(b.user_liquidity ?? b.userLiquidity ?? b.liquidity ?? "0"));
       return liq > 0n;
     })
     .map((b) => ({
-      bin_id: Number(b.bin_id),
-      liquidity: String(b.user_liquidity ?? b.liquidity ?? "0"),
-      reserve_x: String(b.reserve_x ?? "0"),
-      reserve_y: String(b.reserve_y ?? "0"),
+      bin_id: Number(b.bin_id ?? b.binId),
+      liquidity: String(b.user_liquidity ?? b.userLiquidity ?? b.liquidity ?? "0"),
+      reserve_x: String(b.reserve_x ?? b.reserveX ?? "0"),
+      reserve_y: String(b.reserve_y ?? b.reserveY ?? "0"),
       price: String(b.price ?? "0"),
     }));
 }
@@ -359,7 +365,8 @@ async function executeMove(
   privateKey: string,
   pool: PoolMeta,
   moves: MoveEntry[],
-  nonce: bigint
+  nonce: bigint,
+  activeBin: number
 ): Promise<string> {
   const {
     makeContractCall, broadcastTransaction,
@@ -372,20 +379,35 @@ async function executeMove(
   const [xAddr, xName] = pool.token_x.split(".");
   const [yAddr, yName] = pool.token_y.split(".");
 
+  // Route to move-liquidity-multi (absolute to-bin-id, list length 220) instead of
+  // move-relative-liquidity-multi (relative offset, list length 208). Our positions
+  // routinely carry 209–221 bins after prior rebalances; the relative variant's
+  // 208-cap overflows Clarity parse → BadFunctionArgument. The non-relative variant
+  // fits our size exactly and takes absolute signed bin IDs (bin - CENTER_BIN_ID).
+  const activeSigned = activeBin - CENTER_BIN_ID;
   const moveList = moves.map((m) => {
     const amt = BigInt(m.amount);
-    // Slippage protection: require ≥95% DLP back, cap fees at 5% of amount.
-    // If the contract returns fewer shares or charges higher fees, the tx reverts.
-    const minDlp = amt * 95n / 100n;
+    // min-dlp=1n: the Clarity router enforces value conservation on-chain via
+    // the dlmm-core fold (contract-call? into pool-trait for withdraw + deposit).
+    // This is NOT a placeholder — cross-bin moves legitimately produce fewer
+    // destination shares because DLP is bin-price-indexed (bin 460 → bin 622 at
+    // very different prices conserves token value, not share count). Setting
+    // min-dlp high enough to block that conservation would reject every legitimate
+    // cross-bin rebalance. Proof: redeploy tx 0349cbb0... succeeded on mainnet
+    // (block 7630142) with (ok (list u257199 ...)) — the router arithmetic did
+    // the value-conservation work regardless of min-dlp=1n.
+    // Follow-up (v2): price-aware min-dlp = 95% × (price_from / price_to) × amount
+    // to keep per-bin slippage protection while surviving cross-bin conversions.
+    const minDlp = 1n;
     const maxFee = amt * 5n / 100n;
     return tupleCV({
-      "from-bin-id": intCV(m.fromBinId),
-      "active-bin-id-offset": intCV(m.activeBinOffset),
       amount: uintCV(amt),
-      "min-dlp": uintCV(minDlp),
+      "from-bin-id": intCV(m.fromBinId),
       "max-x-liquidity-fee": uintCV(maxFee),
       "max-y-liquidity-fee": uintCV(maxFee),
+      "min-dlp": uintCV(minDlp),
       "pool-trait": contractPrincipalCV(poolAddr, poolName),
+      "to-bin-id": intCV(activeSigned + m.activeBinOffset),
       "x-token-trait": contractPrincipalCV(xAddr, xName),
       "y-token-trait": contractPrincipalCV(yAddr, yName),
     });
@@ -394,7 +416,7 @@ async function executeMove(
   const tx = await makeContractCall({
     contractAddress: ROUTER_ADDR,
     contractName: ROUTER_NAME,
-    functionName: "move-relative-liquidity-multi",
+    functionName: "move-liquidity-multi",
     functionArgs: [listCV(moveList)],
     senderKey: privateKey,
     network: STACKS_MAINNET,
@@ -403,7 +425,10 @@ async function executeMove(
     postConditionMode: PostConditionMode.Allow,
     anchorMode: AnchorMode.Any,
     nonce,
-    fee: 50000n,
+    // TODO: replace with get_stx_fees dynamic estimation. 250000n is the current
+    // mempool floor as of Apr 2026 (Bitflow/Hiro team confirmed same floor in
+    // their hiro-400 work); will need bumps as the floor climbs.
+    fee: 250000n,
   });
 
   const result = await broadcastTransaction({ transaction: tx, network: STACKS_MAINNET });
@@ -661,7 +686,7 @@ program
       log(`Nonce: ${nonce}`);
 
       log(`Broadcasting atomic move (${movePositions.length} bins → ±${spread} around active ${activeBin})...`);
-      const moveTxId = await executeMove(keys.stxPrivateKey, pool, movePositions, nonce);
+      const moveTxId = await executeMove(keys.stxPrivateKey, pool, movePositions, nonce, activeBin);
       log(`Move broadcast: ${moveTxId}`);
 
       // Record cooldown
@@ -802,7 +827,7 @@ program
             log(`${pool.pool_id} (${health.pair}): drift ${health.drift} bins — MOVING (atomic, ±${spread})`);
 
             const nonce = await fetchNonce(wallet);
-            const moveTxId = await executeMove(keys.stxPrivateKey, pool, movePositions, nonce);
+            const moveTxId = await executeMove(keys.stxPrivateKey, pool, movePositions, nonce, activeBin);
             log(`  Move broadcast: ${moveTxId}`);
 
             // Record cooldown

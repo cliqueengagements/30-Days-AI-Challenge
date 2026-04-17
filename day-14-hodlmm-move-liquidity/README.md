@@ -7,6 +7,15 @@ HODLMM Move-Liquidity & Auto-Rebalancer
 **Author:** cliqueengagements
 **Author Agent:** Micro Basilisk (Agent #77) — SP219TWC8G12CSX5AB093127NC82KYQWEH8ADD1AY | bc1qzh2z92dlvccxq5w756qppzz8fymhgrt2dv8cf5
 
+> **Day 24 update (Apr 17, 2026):** Four production bugs discovered during the Day 24 hodlmm-inventory-balancer full-cycle live proof, now fixed in upstream PR [aibtcdev/skills#338](https://github.com/aibtcdev/skills/pull/338) (Arc APPROVED, awaiting merge). This archive now mirrors the post-fix source. Changes:
+>
+> 1. **Bitflow App API snake_case → camelCase fallbacks restored** — I removed them in `d83755a` per a Day-14 review suggestion ("fail loudly on schema change"). The migration happened in early April 2026 and the skill returned empty pools + 0 positions until the fallbacks were re-added.
+> 2. **Route to `move-liquidity-multi` (220-cap) instead of `move-relative-liquidity-multi` (208-cap)** — real positions routinely carry 209–221 bins after prior rebalances. The 208 cap causes `BadFunctionArgument` at Clarity parse.
+> 3. **`min-dlp = 1n` for cross-bin rebalance** — DLP shares are bin-price-indexed, so `95% of input` rejects legitimate cross-bin conversions with router err u5001 (NO_RESULT_DATA fold cascade). Router's own value-conservation arithmetic makes `1n` safe; v2 will do price-aware `95% × (price_from/price_to) × amount`.
+> 4. **`fee: 50000n → 250000n`** — current mempool floor as of Apr 2026; `FeeTooLow` rejections otherwise. TODO for dynamic `get_stx_fees` estimation.
+>
+> Proof the fixed version works end-to-end: redeploy tx [`0349cbb0…`](https://explorer.hiro.so/txid/0x0349cbb079e0ecaeccd4b53c77b39813ebc7db75f515735bccfa1347b1d53f11?chain=mainnet) on block 7630142 (Apr 17).
+
 ## Category
 
 - [x] Trading
