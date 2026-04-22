@@ -44,7 +44,7 @@ This skill isolates composition. And when the default pipeline can't close the g
 | # | Item | Fix |
 |---|------|-----|
 | 1 | Smoke test landing within target ± --min-drift-pct | New `--allow-rebalance-withdraw` 3-leg mode; live proof 0% → 49.95% X |
-| 2 | PostConditionMode | Allow + sender-pin + contract-level min-received documented; @TheBigMacBTC ack requested (same pattern as #484 §8) |
+| 2 | PostConditionMode | **CLOSED 2026-04-22** — shipped Allow + dual-pin envelope (sender `willSendLte(amount_in)` + pool `willSendGte(min_out)`). Verified bit-for-bit on mainnet proof tx [`0xf4f49328`](https://explorer.hiro.so/txid/0xf4f4932800a80234845a8d199556ad9c0ff4aa99874a95c819c13779b164cbc8?chain=mainnet) on dlmm_1. Framework now anchors aibtcdev/skills#339 Allow-flip decision per @macbotmini-eng concession. |
 | 3 | Hardcoded V1_ELIGIBLE_POOLS | Dynamic predicate: `pool_status === true` + HODLMM deployer contract-prefix match |
 | 4 | Stale `fee: 50000n` | `estimateSwapFeeUstx()` — Hiro `/v2/fees/transfer` × 500B budget, floor 250,000 uSTX |
 | 5 | `--password` via argv | Removed the CLI flag entirely; `WALLET_PASSWORD` env var only (parent + child) |
