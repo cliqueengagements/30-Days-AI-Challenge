@@ -1,6 +1,7 @@
 # Day 12 — Stacks Alpha Engine
 
-> **PR:** https://github.com/BitflowFinance/bff-skills/pull/213 (open — approved by arc0btc)
+> **Staging (bff-skills):** [PR #213](https://github.com/BitflowFinance/bff-skills/pull/213) + resubmission [PR #485](https://github.com/BitflowFinance/bff-skills/pull/485) (both approved by @arc0btc)
+> **Upstream (aibtcdev/skills):** [PR #339 MERGED 2026-04-21](https://github.com/aibtcdev/skills/pull/339) (by @biwasxyz) + [PR #346 open fix-up](https://github.com/aibtcdev/skills/pull/346) — adds Granite redeem PC structural fix (commit [`3c12b0f`](https://github.com/aibtcdev/skills/pull/346/commits/3c12b0f)), USDh borrow/repay leveraged-yield route (commit [`07af216`](https://github.com/aibtcdev/skills/pull/346/commits/07af216)), AGENT.md sync (commit [`159f28c`](https://github.com/aibtcdev/skills/pull/346/commits/159f28c))
 > **Supersedes:** PR #196 (zbg-alpha-engine, closed — Granite aeUSDC bug)
 
 ## Skill name
@@ -24,12 +25,12 @@ Every write runs: **Scout -> Reserve -> Guardian -> YTG -> Executor**. No bypass
 
 ### Protocol coverage
 
-| Protocol | Token(s) | Deposit | Withdraw | Method |
-|----------|---------|---------|----------|--------|
-| Zest v2 | sBTC | `zest_supply` | `zest_withdraw` | MCP native |
-| Hermetica | USDh/sUSDh | `staking-v1.stake` | `staking-v1.unstake` + `silo.withdraw` | call_contract |
-| Granite | aeUSDC | `lp-v1.deposit` | `lp-v1.redeem` (ERC-4626) | call_contract |
-| HODLMM | per pool pair | `add-liquidity-simple` | `withdraw-liquidity-simple` | Bitflow skill |
+| Protocol | Token(s) | Deposit | Withdraw | Debt (borrow/repay) | Method |
+|----------|---------|---------|----------|---------------------|--------|
+| Zest v2 | sBTC (supply), USDh (borrow) | `zest_supply` | `zest_withdraw` | `zest_borrow` / `zest_repay` — USDh only | MCP native |
+| Hermetica | USDh/sUSDh | `staking-v1-1.stake` | `staking-v1-1.unstake` + `silo.withdraw` | — | call_contract |
+| Granite | aeUSDC | `lp-v1.deposit` | `lp-v1.redeem` (ERC-4626, 3-PC shape) | — | call_contract |
+| HODLMM | per pool pair | `add-liquidity-simple` | `withdraw-liquidity-simple` | — | Bitflow skill |
 
 ### YTG (Yield-to-Gas) profit gate
 
@@ -49,9 +50,41 @@ No other skill covers all 4 Stacks DeFi protocols with working read and write pa
 
 ## On-chain proof
 
-- **Zest sBTC supply**: [`b8ec03c3...`](https://explorer.hiro.so/txid/b8ec03c3ba85c40840cdc933b61a14faf2a9516e1ce1314d9768228f3328803f?chain=mainnet) — 14,336 zsBTC shares received
-- **HODLMM add-liquidity**: [`f2ffb41e...`](https://explorer.hiro.so/txid/f2ffb41e1f29a5c5ee5fa0df628a700e21bf14a4aabbd334b5f49b98bab9e315?chain=mainnet) — dlmm-liquidity-router
-- **Granite aeUSDC (failed)**: [`dd4061b3...`](https://explorer.hiro.so/txid/dd4061b3fe418a0dfda273fd5bccc07ebd905146966ce622d516f64c75272e50?chain=mainnet) — proves pool only accepts aeUSDC, not sBTC
+### Full write-path proof cycle (2026-04-22)
+
+- **Zest sBTC supply** (fresh): [`0x315a6d54`](https://explorer.hiro.so/txid/0x315a6d54c524aaef4c01834b2fec5b8c5ee4997e79a8f3c344394761276d253d?chain=mainnet) — 10,000 sats → 9,995 zsBTC via `v0-4-market.supply-collateral-add`
+- **Zest sBTC withdraw**: [`0x016c3996`](https://explorer.hiro.so/txid/0x016c3996f981ffcf345e11268905e2d3332f1c0e6e188ab2627e07317c0694a6?chain=mainnet) — 15,335 zsBTC → 15,342 sats via `v0-4-market.collateral-remove-redeem`
+- **Zest USDh borrow** (leveraged-yield leg): [`0x2b465aae`](https://explorer.hiro.so/txid/0x2b465aae05812d25e4f52799b5f2882b21ca411d892359aba5157dba85d1162a?chain=mainnet) — 50M µUSDh borrowed against sBTC collateral via `v0-4-market.borrow`
+- **Zest USDh repay**: [`0xd3b46ae7`](https://explorer.hiro.so/txid/0xd3b46ae74b666af2e06a765d29e30bd2b0341507266827a2140cc4d9e6053fba?chain=mainnet) — full 50M µUSDh debt cleared via `v0-4-market.repay`
+- **Granite redeem** (with corrected 3-PC shape from commit `3c12b0f`): [`0xd4aa0c4e`](https://explorer.hiro.so/txid/0xd4aa0c4ed51b0951e91bb6680e44bc01da36722525fa7b28c39d98219e3eeba9?chain=mainnet) — 4,936,276 lp-token burned → 4,999,538 aeUSDC (ratio 1.0128)
+- **Hermetica unstake**: [`0x7834cd32`](https://explorer.hiro.so/txid/0x7834cd325b986f2db2275b3fe867ca094c3c375d67a77d7f5fb3858d0f94eaad?chain=mainnet) — 408,500,348 sUSDh burned → 5.007 USDh in silo claim 2157 (7-day cooldown; exchange ratio 1.2257)
+
+### Historical references
+
+- **Zest sBTC supply** (original): [`b8ec03c3`](https://explorer.hiro.so/txid/b8ec03c3ba85c40840cdc933b61a14faf2a9516e1ce1314d9768228f3328803f?chain=mainnet) — 14,336 zsBTC shares received; same contract/function as the fresh proof above
+- **Hermetica stake**: [`e8b2213d`](https://explorer.hiro.so/txid/e8b2213d39faf2e9ccfe52bc3cbe33885303aa01c63f93badd3e8a41900a2ecf?chain=mainnet) — USDh → sUSDh via `staking-v1-1.stake`
+- **Granite aeUSDC deposit**: [`0x205bf3f1`](https://explorer.hiro.so/txid/0x205bf3f135c5f1cddd8323c1a1a054f3a63ac81904c4244a763b0ce4b26c3352?chain=mainnet) — `lp-v1.deposit`
+- **HODLMM add-liquidity**: [`f2ffb41e`](https://explorer.hiro.so/txid/f2ffb41e1f29a5c5ee5fa0df628a700e21bf14a4aabbd334b5f49b98bab9e315?chain=mainnet) — dlmm-liquidity-router
+- **Granite aeUSDC routing proof (failed by design)**: [`dd4061b3`](https://explorer.hiro.so/txid/dd4061b3fe418a0dfda273fd5bccc07ebd905146966ce622d516f64c75272e50?chain=mainnet) — confirms pool accepts aeUSDC only, not sBTC
+
+### Bug-evidence receipts
+
+- Granite redeem aborts under shipped (pre-fix) PC shape: [`0x5780062068`](https://explorer.hiro.so/txid/0x5780062068f4fe9d7be13aa971f9da386f149d0c6ffa720fe1e2843ad9af4d77?chain=mainnet) (deny mode) + [`0x60e2f84b83`](https://explorer.hiro.so/txid/0x60e2f84b83f037310ae67ba1150322d61eb5a0e9c755351888b982f975d30df1?chain=mainnet) (allow mode). Clarity `(ok true)` both, tx `abort_by_post_condition` — proves the 3 structural PC bugs (principal, asset_name, direction) fixed by `3c12b0f`.
+- Reference successful 3rd-party Granite redeem (used to derive the correct PC shape): [`0xd0bb0059`](https://explorer.hiro.so/txid/0xd0bb0059b72e5f5d75a4dd1bedb12e44e32790567bc282184ca5309641a8f44f?chain=mainnet)
+- MCP Zest borrow restriction probes (USDh only works; USDC/STX/stSTX abort `(err none)`): [`0xb6553545`](https://explorer.hiro.so/txid/0xb65535453a2fe2d6000c4d3e09d0678e1f28f6a6ecfdfc21e83eae8ef0dd61a3?chain=mainnet) + [`0x0bfa4344`](https://explorer.hiro.so/txid/0x0bfa434424cef15054a87ab57c65abf0c8629cfdcd324f87fb260b3bfdaf47c4?chain=mainnet) + [`0xe388a8bd`](https://explorer.hiro.so/txid/0xe388a8bdb90fd8f16d1ba324334eb283affefac713b978a21c6cbc956a844526?chain=mainnet) — justifies `validTokens_borrowRepay = { zest: ["usdh"] }` restriction
+
+## Leveraged-yield pattern (unlocked by `07af216`)
+
+```
+deploy zest --token sbtc             # supply collateral
+borrow zest --token usdh             # take debt (~7% APR)
+deploy hermetica --token usdh        # stake for ~40% APY
+# ---- earning ~33% positive carry while sBTC exposure preserved ----
+withdraw hermetica                   # unstake sUSDh → 7-day silo claim
+# ---- wait 7 days ----
+repay zest --token usdh              # close debt
+withdraw zest                        # recover sBTC
+```
 
 ## Safety notes
 
@@ -76,6 +109,8 @@ No other skill covers all 4 Stacks DeFi protocols with working read and write pa
 | `scan` | read | Full report: 6 tokens, 4 protocols, 3-tier yields with YTG, PoR, safety gates |
 | `deploy` | write | Deploy capital to a protocol |
 | `withdraw` | write | Pull capital from a protocol |
+| `borrow` | write | Borrow a debt asset against existing Zest collateral (USDh only — leveraged-yield leg) |
+| `repay` | write | Repay a borrowed Zest debt asset |
 | `rebalance` | write | Re-center HODLMM bins on active bin |
 | `migrate` | write | Cross-protocol capital movement |
 | `emergency` | write | Withdraw ALL positions across all 4 protocols |
@@ -426,7 +461,7 @@ Specialized agents providing services to other agents, with micropayments settli
 7. **YTG blocks small positions** — low-capital wallets may see most options flagged unprofitable. Use `--force` to override.
 8. **Zest 0% APY** — correct: ~0 borrowed against ~650 BTC supplied. Live read, not hardcoded.
 
-**1,946 lines.** 11 self-tests. 12+ live data sources. 7 commands. 4 protocols. 6 tokens. 3-tier yields. YTG profit gates. Every safety claim is in the code, not just the docs.
+**2,274 lines.** 11 self-tests. 12+ live data sources. 9 commands. 4 protocols. 6 tokens. 3-tier yields. YTG profit gates. USDh borrow/repay leveraged-yield route. 6-leg mainnet proof cycle. Every safety claim is in the code, not just the docs.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
