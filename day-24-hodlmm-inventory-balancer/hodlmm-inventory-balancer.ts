@@ -687,16 +687,29 @@ async function executeCorrectiveSwap(
   const minOut = BigInt(plan.minimum_amount_out_raw);
 
   const inAsset = resolveTokenAsset(plan.token_in);
+  const outAsset = resolveTokenAsset(plan.token_out);
 
-  // Post-condition: bounded upper send on the INPUT side. Allow mode because
-  // the router emits pool/protocol fee transfers that vary with pool config;
-  // Deny would require an explicit allowance for each fee flow. Minimum-output
-  // slippage is enforced by the router's own `min-received` argument
-  // (ERR_MINIMUM_RECEIVED internally). Same safety contract `hodlmm-move-liquidity`
-  // uses for its DLP mint/burn flow.
+  // Post-conditions: dual pins under existing Allow mode, closing @diegomey's item 2
+  // from the #494 review per @macbotmini-eng's audit. Mirrors the author's mainnet
+  // refs 0x134df5e1… and 0x5195822e… (and the broader 0x958719b5… / 0x9f3731fc…
+  // baseline for swap-simple-multi):
+  //   - PC[0] caller's max input — Pc.principal(sender).willSendLte(amountIn)
+  //   - PC[1] pool's min output — Pc.principal(pool).willSendGte(minOut)
+  // The output PC is anchored on the POOL principal (the pool sends the output
+  // token to the caller), not the caller — Stacks post-conditions evaluate against
+  // the principal that is sending the asset, so a "user receives ≥ X" invariant
+  // is expressed as "pool sends ≥ X". @stacks/transactions Pc builder exposes
+  // willSendGte; there is no willReceiveGte primitive (the receive-side framing
+  // doesn't exist at the protocol level).
+  // Allow mode (vs Deny + enumerate-each-fee) remains because protocol/provider
+  // fees accrue inside dlmm-core's `unclaimed-protocol-fees` map and bin balances
+  // — they do NOT emit FT transfer events on the swap tx (verified on-chain), so
+  // the receive-side pool pin is orthogonal to the fee-flow surface.
   const senderPin = Pc.principal(senderAddress).willSendLte(amountIn);
+  const poolPin = Pc.principal(pool.pool_contract).willSendGte(minOut);
   const pcs: unknown[] = [
     inAsset.kind === "stx" ? senderPin.ustx() : senderPin.ft(inAsset.contract, inAsset.assetName),
+    outAsset.kind === "stx" ? poolPin.ustx() : poolPin.ft(outAsset.contract, outAsset.assetName),
   ];
 
   // Canonical entrypoint: swap-simple-multi takes a list of swap tuples.
